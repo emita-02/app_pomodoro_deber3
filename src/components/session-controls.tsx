@@ -74,7 +74,7 @@ async function scheduleCompletionNotification(
     await notifications.scheduleNotificationAsync({
       content: {
         title: "Sesión terminada",
-        body: "Finalizó tu sesión de estudio.",
+        body: `Finalizó ${getPhaseLabel(session.phase).toLowerCase()}.`,
       },
       trigger: {
         type: notifications.SchedulableTriggerInputTypes.DATE,
@@ -105,6 +105,25 @@ function formatRemainingTime(remainingMs: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+function getPhaseLabel(phase: Session["phase"]): string {
+  switch (phase) {
+    case "shortBreak":
+      return "Descanso corto";
+    case "longBreak":
+      return "Descanso largo";
+    default:
+      return "Estudio";
+  }
+}
+
+function getCompletedPhaseLabel(session: Session): string {
+  if (session.phase !== "study") {
+    return "estudio";
+  }
+
+  return session.pomodorosCompleted === 0 ? "descanso largo" : "descanso corto";
+}
+
 export function SessionControls() {
   const [fontsLoaded] = useFonts({ CraftyGirls_400Regular });
   const [session, setSession] = useState<Session>(() =>
@@ -115,6 +134,7 @@ export function SessionControls() {
   const sessionRef = useRef(session);
   const fontFamily = fontsLoaded ? "CraftyGirls_400Regular" : "sans-serif";
   const isCompleted = shouldShowCompleted(session);
+  const phaseLabel = getPhaseLabel(session.phase);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -220,7 +240,7 @@ export function SessionControls() {
   function handleReset() {
     Alert.alert(
       "Reiniciar sesión",
-      "¿Quieres volver al tiempo inicial de estudio?",
+      `¿Quieres volver al tiempo inicial de ${phaseLabel.toLowerCase()}?`,
       [
         { text: "Cancelar", style: "cancel" },
         {
@@ -239,22 +259,23 @@ export function SessionControls() {
     );
   }
 
-  const imageSource = isCompleted
-    ? require("@/assets/images/puma_saludo.png")
-    : require("@/assets/images/puma_estudiando.png");
-  const statusText = isCompleted
-    ? "Sesión terminada"
-    : session.isRunning
+  const imageSource =
+    session.phase === "study"
+      ? require("@/assets/images/puma_estudiando.png")
+      : require("@/assets/images/puma_descansando.png");
+  const statusText = session.isRunning
+    ? session.phase === "study"
       ? "Estudiando"
-      : session.isPaused
-        ? "En pausa"
-        : "Lista para comenzar";
+      : `${phaseLabel} en curso`
+    : session.isPaused
+      ? `${phaseLabel} en pausa`
+      : `${phaseLabel} lista para comenzar`;
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         <Text style={[styles.brand, { fontFamily }]}>Academia Cotopaxi</Text>
-        <Text style={[styles.heading, { fontFamily }]}>Sesión de estudio</Text>
+        <Text style={[styles.heading, { fontFamily }]}>{phaseLabel}</Text>
         <Image source={imageSource} style={styles.image} resizeMode="contain" />
         <Text
           accessibilityLabel={`Tiempo restante ${formatRemainingTime(session.remainingMs)}`}
@@ -267,73 +288,75 @@ export function SessionControls() {
           style={[styles.status, { fontFamily }]}
         >
           {isCompleted
-            ? "Tu sesión terminó. La siguiente fase queda lista para iniciar cuando tú decidas."
+            ? `Terminó ${getCompletedPhaseLabel(session)}. ${phaseLabel} queda lista para iniciar cuando tú decidas.`
             : statusText}
+        </Text>
+        <Text
+          accessibilityLabel={`Pomodoros completados: ${session.pomodorosCompleted} de ${session.pomodorosPerCycle}`}
+          style={[styles.progress, { fontFamily }]}
+        >
+          Pomodoros: {session.pomodorosCompleted}/{session.pomodorosPerCycle}
         </Text>
         {notificationMessage.length > 0 && (
           <Text style={[styles.permissionNotice, { fontFamily }]}>
             {notificationMessage}
           </Text>
         )}
-        {!isCompleted && (
-          <View style={styles.actions}>
-            {session.isRunning ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Pausar sesión de estudio"
-                onPress={handlePause}
-                style={({ pressed }) => [
-                  styles.primaryButton,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={[styles.buttonText, { fontFamily }]}>Pausar</Text>
-              </Pressable>
-            ) : session.isPaused ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Reanudar sesión de estudio"
-                onPress={handleResume}
-                style={({ pressed }) => [
-                  styles.primaryButton,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={[styles.buttonText, { fontFamily }]}>
-                  Reanudar
-                </Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Iniciar sesión de estudio"
-                disabled={!isLoaded}
-                onPress={handleStart}
-                style={({ pressed }) => [
-                  styles.primaryButton,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={[styles.buttonText, { fontFamily }]}>Iniciar</Text>
-              </Pressable>
-            )}
-            {(session.isRunning || session.isPaused) && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Reiniciar sesión de estudio"
-                onPress={handleReset}
-                style={({ pressed }) => [
-                  styles.secondaryButton,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={[styles.secondaryButtonText, { fontFamily }]}>
-                  Reiniciar
-                </Text>
-              </Pressable>
-            )}
-          </View>
-        )}
+        <View style={styles.actions}>
+          {session.isRunning ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Pausar ${phaseLabel.toLowerCase()}`}
+              onPress={handlePause}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={[styles.buttonText, { fontFamily }]}>Pausar</Text>
+            </Pressable>
+          ) : session.isPaused ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Reanudar ${phaseLabel.toLowerCase()}`}
+              onPress={handleResume}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={[styles.buttonText, { fontFamily }]}>Reanudar</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Iniciar ${phaseLabel.toLowerCase()}`}
+              disabled={!isLoaded}
+              onPress={handleStart}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={[styles.buttonText, { fontFamily }]}>Iniciar</Text>
+            </Pressable>
+          )}
+          {(session.isRunning || session.isPaused) && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Reiniciar ${phaseLabel.toLowerCase()}`}
+              onPress={handleReset}
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={[styles.secondaryButtonText, { fontFamily }]}>
+                Reiniciar
+              </Text>
+            </Pressable>
+          )}
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -376,6 +399,11 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 8,
     minHeight: 34,
+  },
+  progress: {
+    color: "#F2F2F2",
+    fontSize: 18,
+    marginTop: 6,
   },
   permissionNotice: {
     color: "#F2D194",

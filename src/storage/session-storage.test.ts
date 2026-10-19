@@ -28,6 +28,23 @@ describe("session storage", () => {
     );
   });
 
+  it("persists the current phase and completed-pomodoro count", async () => {
+    const session: Session = {
+      ...createSession({ durationMs: 10_000 }),
+      phase: "longBreak",
+      durationMs: 900_000,
+      remainingMs: 600_000,
+      pomodorosCompleted: 3,
+    };
+
+    await saveSession(session);
+
+    expect(mockedStorage.setItem).toHaveBeenCalledWith(
+      "@app_pomodoro/session",
+      JSON.stringify(session),
+    );
+  });
+
   it("subtracts elapsed time when recovering a running session", async () => {
     const running = startSession(createSession({ durationMs: 10_000 }), 1_000);
     mockedStorage.getItem.mockResolvedValue(JSON.stringify(running));
@@ -49,6 +66,83 @@ describe("session storage", () => {
     mockedStorage.getItem.mockResolvedValue(JSON.stringify(paused));
 
     await expect(loadSession(9_000)).resolves.toEqual(paused);
+  });
+
+  it("normalizes a saved session without cycle fields as prepared study with zero progress", async () => {
+    mockedStorage.getItem.mockResolvedValue(
+      JSON.stringify({
+        durationMs: 10_000,
+        remainingMs: 6_000,
+        isRunning: false,
+        isPaused: false,
+        isCompleted: false,
+        lastUpdatedAt: null,
+      }),
+    );
+
+    await expect(loadSession(9_000)).resolves.toMatchObject({
+      studyDurationMs: 10_000,
+      phase: "study",
+      pomodorosCompleted: 0,
+      shortBreakDurationMs: 5 * 60 * 1000,
+      longBreakDurationMs: 15 * 60 * 1000,
+      pomodorosPerCycle: 4,
+      status: "prepared",
+    });
+  });
+
+  it("allows starting a completed legacy study snapshot after restoring it", async () => {
+    mockedStorage.getItem.mockResolvedValue(
+      JSON.stringify({
+        durationMs: 25 * 60 * 1000,
+        remainingMs: 0,
+        isRunning: false,
+        isPaused: false,
+        isCompleted: true,
+        lastUpdatedAt: 25 * 60 * 1000,
+      }),
+    );
+
+    const restored = await loadSession(30 * 60 * 1000);
+
+    expect(startSession(restored as Session, 30 * 60 * 1000)).toMatchObject({
+      phase: "study",
+      durationMs: 25 * 60 * 1000,
+      remainingMs: 25 * 60 * 1000,
+      pomodorosCompleted: 0,
+      status: "running",
+      isRunning: true,
+      isCompleted: false,
+      lastUpdatedAt: 30 * 60 * 1000,
+    });
+  });
+
+  it("persists the next prepared phase when a break expired while closed", async () => {
+    const expiredShortBreak: Session = {
+      ...createSession({ durationMs: 10_000, shortBreakDurationMs: 300 }),
+      phase: "shortBreak",
+      durationMs: 300,
+      remainingMs: 300,
+      isRunning: true,
+      status: "running",
+      lastUpdatedAt: 1_000,
+    };
+    mockedStorage.getItem.mockResolvedValue(JSON.stringify(expiredShortBreak));
+
+    const restored = await loadSession(1_300);
+
+    expect(restored).toMatchObject({
+      phase: "study",
+      durationMs: 10_000,
+      remainingMs: 10_000,
+      pomodorosCompleted: 1,
+      status: "prepared",
+      isRunning: false,
+    });
+    expect(mockedStorage.setItem).toHaveBeenCalledWith(
+      "@app_pomodoro/session",
+      JSON.stringify(restored),
+    );
   });
 
   it("returns null when no session has been saved", async () => {

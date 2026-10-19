@@ -1,6 +1,17 @@
+export type SessionPhase = "study" | "shortBreak" | "longBreak";
+
+export type SessionStatus = "prepared" | "running" | "paused" | "completed";
+
 export interface Session {
+  studyDurationMs: number;
   durationMs: number;
   remainingMs: number;
+  phase: SessionPhase;
+  pomodorosCompleted: number;
+  shortBreakDurationMs: number;
+  longBreakDurationMs: number;
+  pomodorosPerCycle: number;
+  status: SessionStatus;
   isRunning: boolean;
   isPaused: boolean;
   isCompleted: boolean;
@@ -9,12 +20,22 @@ export interface Session {
 
 export interface SessionConfig {
   durationMs: number;
+  shortBreakDurationMs?: number;
+  longBreakDurationMs?: number;
+  pomodorosPerCycle?: number;
 }
 
 export function createSession(config: SessionConfig): Session {
   return {
+    studyDurationMs: config.durationMs,
     durationMs: config.durationMs,
     remainingMs: config.durationMs,
+    phase: "study",
+    pomodorosCompleted: 0,
+    shortBreakDurationMs: config.shortBreakDurationMs ?? 5 * 60 * 1000,
+    longBreakDurationMs: config.longBreakDurationMs ?? 15 * 60 * 1000,
+    pomodorosPerCycle: config.pomodorosPerCycle ?? 4,
+    status: "prepared",
     isRunning: false,
     isPaused: false,
     isCompleted: false,
@@ -23,14 +44,54 @@ export function createSession(config: SessionConfig): Session {
 }
 
 export function startSession(session: Session, now: number): Session {
-  if (session.isRunning || session.isPaused || session.isCompleted) {
+  if (session.status !== "prepared" && session.status !== "completed") {
     return session;
   }
 
   return {
     ...session,
+    remainingMs:
+      session.status === "completed" ? session.durationMs : session.remainingMs,
+    status: "running",
     isRunning: true,
+    isPaused: false,
+    isCompleted: false,
     lastUpdatedAt: now,
+  };
+}
+
+function prepareNextPhase(session: Session): Session {
+  let phase: SessionPhase;
+  let pomodorosCompleted = session.pomodorosCompleted;
+  let durationMs: number;
+
+  if (session.phase === "study") {
+    phase =
+      pomodorosCompleted >= session.pomodorosPerCycle - 1
+        ? "longBreak"
+        : "shortBreak";
+    durationMs =
+      phase === "longBreak"
+        ? session.longBreakDurationMs
+        : session.shortBreakDurationMs;
+  } else {
+    phase = "study";
+    durationMs = session.studyDurationMs;
+    pomodorosCompleted =
+      session.phase === "shortBreak" ? pomodorosCompleted + 1 : 0;
+  }
+
+  return {
+    ...session,
+    phase,
+    pomodorosCompleted,
+    durationMs,
+    remainingMs: durationMs,
+    status: "prepared",
+    isRunning: false,
+    isPaused: false,
+    isCompleted: true,
+    lastUpdatedAt: null,
   };
 }
 
@@ -41,13 +102,17 @@ export function advanceSession(session: Session, now: number): Session {
 
   const elapsedMs = Math.max(0, now - session.lastUpdatedAt);
   const remainingMs = Math.max(0, session.remainingMs - elapsedMs);
-  const isCompleted = remainingMs === 0;
+
+  if (remainingMs === 0) {
+    return prepareNextPhase(session);
+  }
 
   return {
     ...session,
     remainingMs,
-    isRunning: !isCompleted,
-    isCompleted,
+    status: "running",
+    isRunning: true,
+    isCompleted: false,
     lastUpdatedAt: now,
   };
 }
@@ -61,6 +126,7 @@ export function pauseSession(session: Session, now: number): Session {
 
   return {
     ...updatedSession,
+    status: "paused",
     isRunning: false,
     isPaused: true,
   };
@@ -73,6 +139,7 @@ export function resumeSession(session: Session, now: number): Session {
 
   return {
     ...session,
+    status: "running",
     isRunning: true,
     isPaused: false,
     lastUpdatedAt: now,
@@ -87,6 +154,7 @@ export function resetSession(session: Session, confirmed: boolean): Session {
   return {
     ...session,
     remainingMs: session.durationMs,
+    status: "prepared",
     isRunning: false,
     isPaused: false,
     isCompleted: false,
