@@ -25,6 +25,26 @@ export interface SessionConfig {
   pomodorosPerCycle?: number;
 }
 
+export type NotificationPermissionState = "granted" | "denied" | "undetermined";
+
+export type NotificationPermissionAction = "request" | "explain" | "none";
+
+export function getNotificationPermissionAction(
+  permissionState: NotificationPermissionState,
+  hasRequestedPermission: boolean,
+  isLaterCycle: boolean,
+): NotificationPermissionAction {
+  if (permissionState === "granted") {
+    return "none";
+  }
+
+  if (!hasRequestedPermission) {
+    return "request";
+  }
+
+  return isLaterCycle ? "explain" : "none";
+}
+
 export function createSession(config: SessionConfig): Session {
   return {
     studyDurationMs: config.durationMs,
@@ -95,7 +115,7 @@ function prepareNextPhase(session: Session): Session {
   };
 }
 
-export function advanceSession(session: Session, now: number): Session {
+export function syncSessionState(session: Session, now: number): Session {
   if (!session.isRunning || session.lastUpdatedAt === null) {
     return session;
   }
@@ -115,6 +135,10 @@ export function advanceSession(session: Session, now: number): Session {
     isCompleted: false,
     lastUpdatedAt: now,
   };
+}
+
+export function advanceSession(session: Session, now: number): Session {
+  return syncSessionState(session, now);
 }
 
 export function pauseSession(session: Session, now: number): Session {

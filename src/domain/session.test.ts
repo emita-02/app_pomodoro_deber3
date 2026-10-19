@@ -1,11 +1,13 @@
 import {
     advanceSession,
     createSession,
+    getNotificationPermissionAction,
     pauseSession,
     resetSession,
     resumeSession,
     shouldShowCompleted,
     startSession,
+    syncSessionState,
 } from "./session";
 
 describe("createSession", () => {
@@ -58,6 +60,18 @@ describe("startSession and advanceSession", () => {
     });
   });
 
+  it("synchronizes elapsed time exactly across repeated updates", () => {
+    const started = startSession(createSession({ durationMs: 10_000 }), 1_000);
+    const once = syncSessionState(started, 4_333);
+    const repeatedly = syncSessionState(
+      syncSessionState(started, 2_222),
+      4_333,
+    );
+
+    expect(repeatedly).toEqual(once);
+    expect(repeatedly.remainingMs).toBe(6_667);
+  });
+
   it("does not start a session that is already running or paused", () => {
     const prepared = createSession({ durationMs: 2_500 });
     const started = startSession(prepared, 1_000);
@@ -87,6 +101,20 @@ describe("startSession and advanceSession", () => {
       lastUpdatedAt: null,
     });
     expect(finished.isRunning).toBe(false);
+  });
+
+  it("prepares the next phase when synchronization happens after the deadline", () => {
+    const started = startSession(createSession({ durationMs: 2_500 }), 1_000);
+    const recoveredLate = syncSessionState(started, 6_000);
+
+    expect(recoveredLate).toMatchObject({
+      phase: "shortBreak",
+      remainingMs: 5 * 60 * 1000,
+      status: "prepared",
+      isRunning: false,
+      isCompleted: true,
+      lastUpdatedAt: null,
+    });
   });
 
   it("reports completion only after the countdown reaches zero", () => {
@@ -277,5 +305,26 @@ describe("resetSession", () => {
     const finished = advanceSession(started, 1_500);
 
     expect(resetSession(finished, true)).toEqual(finished);
+  });
+});
+
+describe("notification permission policy", () => {
+  it("requests permission only before its first request", () => {
+    expect(getNotificationPermissionAction("undetermined", false, false)).toBe(
+      "request",
+    );
+    expect(getNotificationPermissionAction("denied", true, false)).toBe("none");
+  });
+
+  it("does not request an already granted permission", () => {
+    expect(getNotificationPermissionAction("granted", false, false)).toBe(
+      "none",
+    );
+  });
+
+  it("explains how to enable denied notifications at a later cycle", () => {
+    expect(getNotificationPermissionAction("denied", true, true)).toBe(
+      "explain",
+    );
   });
 });

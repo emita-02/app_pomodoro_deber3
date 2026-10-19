@@ -6,6 +6,30 @@ import {
 } from "../domain/session";
 
 const SESSION_STORAGE_KEY = "@app_pomodoro/session";
+const NOTIFICATION_PERMISSION_REQUESTED_KEY =
+  "@app_pomodoro/notification-permission-requested";
+const NOTIFICATION_CYCLE_COMPLETED_KEY =
+  "@app_pomodoro/notification-cycle-completed";
+
+async function readFlag(key: string): Promise<boolean> {
+  return (await AsyncStorage.getItem(key)) === "true";
+}
+
+export async function hasRequestedNotificationPermission(): Promise<boolean> {
+  return readFlag(NOTIFICATION_PERMISSION_REQUESTED_KEY);
+}
+
+export async function markNotificationPermissionRequested(): Promise<void> {
+  await AsyncStorage.setItem(NOTIFICATION_PERMISSION_REQUESTED_KEY, "true");
+}
+
+export async function hasCompletedNotificationCycle(): Promise<boolean> {
+  return readFlag(NOTIFICATION_CYCLE_COMPLETED_KEY);
+}
+
+export async function markNotificationCycleCompleted(): Promise<void> {
+  await AsyncStorage.setItem(NOTIFICATION_CYCLE_COMPLETED_KEY, "true");
+}
 
 export async function saveSession(session: Session): Promise<void> {
   await AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));

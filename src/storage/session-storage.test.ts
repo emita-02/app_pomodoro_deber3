@@ -1,6 +1,13 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createSession, startSession, type Session } from "../domain/session";
-import { loadSession, saveSession } from "./session-storage";
+import {
+    hasCompletedNotificationCycle,
+    hasRequestedNotificationPermission,
+    loadSession,
+    markNotificationCycleCompleted,
+    markNotificationPermissionRequested,
+    saveSession,
+} from "./session-storage";
 
 jest.mock("@react-native-async-storage/async-storage", () => ({
   __esModule: true,
@@ -54,6 +61,14 @@ describe("session storage", () => {
       remainingMs: 7_000,
       lastUpdatedAt: 4_000,
     });
+    expect(mockedStorage.setItem).toHaveBeenCalledWith(
+      "@app_pomodoro/session",
+      JSON.stringify({
+        ...running,
+        remainingMs: 7_000,
+        lastUpdatedAt: 4_000,
+      }),
+    );
   });
 
   it("keeps a paused session unchanged when recovering it", async () => {
@@ -138,16 +153,39 @@ describe("session storage", () => {
       pomodorosCompleted: 1,
       status: "prepared",
       isRunning: false,
+      isCompleted: true,
+      lastUpdatedAt: null,
     });
     expect(mockedStorage.setItem).toHaveBeenCalledWith(
       "@app_pomodoro/session",
       JSON.stringify(restored),
     );
+
+    mockedStorage.getItem.mockResolvedValueOnce(JSON.stringify(restored));
+    await expect(loadSession(9_000)).resolves.toEqual(restored);
   });
 
   it("returns null when no session has been saved", async () => {
     mockedStorage.getItem.mockResolvedValue(null);
 
     await expect(loadSession(9_000)).resolves.toBeNull();
+  });
+
+  it("persists notification permission and first-cycle state separately", async () => {
+    mockedStorage.getItem.mockResolvedValue(null);
+    await expect(hasRequestedNotificationPermission()).resolves.toBe(false);
+    await expect(hasCompletedNotificationCycle()).resolves.toBe(false);
+
+    await markNotificationPermissionRequested();
+    await markNotificationCycleCompleted();
+
+    expect(mockedStorage.setItem).toHaveBeenCalledWith(
+      "@app_pomodoro/notification-permission-requested",
+      "true",
+    );
+    expect(mockedStorage.setItem).toHaveBeenCalledWith(
+      "@app_pomodoro/notification-cycle-completed",
+      "true",
+    );
   });
 });

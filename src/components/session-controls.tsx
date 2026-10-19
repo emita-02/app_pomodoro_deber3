@@ -15,6 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import {
     advanceSession,
     createSession,
+    getNotificationPermissionAction,
     pauseSession,
     resetSession,
     resumeSession,
@@ -22,10 +23,17 @@ import {
     startSession,
     type Session,
 } from "@/domain/session";
-import { loadSession, saveSession } from "@/storage/session-storage";
+import {
+    hasCompletedNotificationCycle,
+    hasRequestedNotificationPermission,
+    loadSession,
+    markNotificationCycleCompleted,
+    markNotificationPermissionRequested,
+    saveSession,
+} from "@/storage/session-storage";
 
 const STUDY_DURATION_MS = 25 * 60 * 1000;
-const NOTIFICATION_CHANNEL_ID = "session-completion";
+const NOTIFICATION_CHANNEL_ID = "session-completion-v2";
 
 type NotificationsModule = typeof import("expo-notifications");
 
@@ -37,44 +45,40 @@ async function loadNotifications(): Promise<NotificationsModule | null> {
   }
 }
 
+async function configureNotifications(
+  notifications: NotificationsModule,
+): Promise<void> {
+  notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+
+  await notifications.setNotificationChannelAsync(NOTIFICATION_CHANNEL_ID, {
+    name: "Sesión de estudio",
+    importance: notifications.AndroidImportance.DEFAULT,
+    sound: "default",
+    enableVibrate: true,
+    vibrationPattern: [0, 250, 250, 250],
+  });
+}
+
 async function scheduleCompletionNotification(
   session: Session,
+  notifications: NotificationsModule,
 ): Promise<boolean> {
   try {
-    const notifications = await loadNotifications();
-    if (!notifications) {
-      return false;
-    }
-
-    notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: true,
-        shouldSetBadge: false,
-      }),
-    });
-
-    await notifications.setNotificationChannelAsync(NOTIFICATION_CHANNEL_ID, {
-      name: "Sesión de estudio",
-      importance: notifications.AndroidImportance.DEFAULT,
-    });
-
-    let permission = await notifications.getPermissionsAsync();
-    if (!permission.granted && permission.canAskAgain) {
-      permission = await notifications.requestPermissionsAsync();
-    }
-
-    if (!permission.granted) {
-      return false;
-    }
-
+    await notifications.cancelAllScheduledNotificationsAsync();
     const deadline =
       (session.lastUpdatedAt ?? Date.now()) + session.remainingMs;
     await notifications.scheduleNotificationAsync({
       content: {
         title: "Sesión terminada",
         body: `Finalizó ${getPhaseLabel(session.phase).toLowerCase()}.`,
+        data: { type: "session-completion" },
       },
       trigger: {
         type: notifications.SchedulableTriggerInputTypes.DATE,
@@ -87,6 +91,41 @@ async function scheduleCompletionNotification(
   } catch {
     return false;
   }
+}
+
+async function scheduleIfPermissionGranted(session: Session): Promise<boolean> {
+  try {
+    const notifications = await loadNotifications();
+    if (!notifications) {
+      return false;
+    }
+
+    await configureNotifications(notifications);
+    const permission = await notifications.getPermissionsAsync();
+    return permission.granted
+      ? scheduleCompletionNotification(session, notifications)
+      : false;
+  } catch {
+    return false;
+  }
+}
+
+function confirmNotificationPermission(): Promise<boolean> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      "Avisos de fin de sesión",
+      "Permite las notificaciones para recibir un aviso cuando termine cada fase, incluso si la aplicación está cerrada.",
+      [
+        {
+          text: "Ahora no",
+          style: "cancel",
+          onPress: () => resolve(false),
+        },
+        { text: "Continuar", onPress: () => resolve(true) },
+      ],
+      { cancelable: false },
+    );
+  });
 }
 
 async function cancelCompletionNotification(): Promise<void> {
@@ -165,6 +204,56 @@ export function SessionControls() {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+    let responseSubscription: { remove: () => void } | undefined;
+
+    function restoreSessionFromNotice() {
+      void loadSession(Date.now()).then((restoredSession) => {
+        if (isMounted && restoredSession) {
+          setSession(restoredSession);
+        }
+      });
+    }
+
+    void loadNotifications().then(async (notifications) => {
+      if (!notifications || !isMounted) {
+        return;
+      }
+
+      responseSubscription =
+        notifications.addNotificationResponseReceivedListener((response) => {
+          if (
+            response.actionIdentifier ===
+              notifications.DEFAULT_ACTION_IDENTIFIER &&
+            response.notification.request.content.data?.type ===
+              "session-completion"
+          ) {
+            restoreSessionFromNotice();
+            void notifications.clearLastNotificationResponseAsync();
+          }
+        });
+
+      const lastResponse =
+        await notifications.getLastNotificationResponseAsync();
+      if (
+        isMounted &&
+        lastResponse?.actionIdentifier ===
+          notifications.DEFAULT_ACTION_IDENTIFIER &&
+        lastResponse.notification.request.content.data?.type ===
+          "session-completion"
+      ) {
+        restoreSessionFromNotice();
+        void notifications.clearLastNotificationResponseAsync();
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      responseSubscription?.remove();
+    };
+  }, []);
+
+  useEffect(() => {
     if (!session.isRunning) {
       return;
     }
@@ -187,6 +276,15 @@ export function SessionControls() {
   }, [session]);
 
   useEffect(() => {
+    if (
+      session.phase === "longBreak" &&
+      session.pomodorosCompleted >= session.pomodorosPerCycle - 1
+    ) {
+      void markNotificationCycleCompleted();
+    }
+  }, [session.phase, session.pomodorosCompleted, session.pomodorosPerCycle]);
+
+  useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active") {
         void loadSession(Date.now()).then((restoredSession) => {
@@ -202,18 +300,79 @@ export function SessionControls() {
     return () => subscription.remove();
   }, []);
 
-  function handleStart() {
-    const startedSession = startSession(session, Date.now());
-    setSession(startedSession);
-    setNotificationMessage("");
-    void saveSession(startedSession);
-    void scheduleCompletionNotification(startedSession).then((scheduled) => {
+  async function prepareNotificationsForFirstStart(
+    startedSession: Session,
+  ): Promise<void> {
+    try {
+      const notifications = await loadNotifications();
+      if (!notifications) {
+        setNotificationMessage(
+          "Las notificaciones no están disponibles. La sesión continuará y verás la fase terminada al volver.",
+        );
+        return;
+      }
+
+      await configureNotifications(notifications);
+      let permission = await notifications.getPermissionsAsync();
+      const hasRequestedPermission = await hasRequestedNotificationPermission();
+      const hasCompletedCycle = await hasCompletedNotificationCycle();
+      const isLaterCycle =
+        hasCompletedCycle &&
+        startedSession.phase === "study" &&
+        startedSession.pomodorosCompleted === 0;
+      const permissionState = permission.granted
+        ? "granted"
+        : permission.status === "denied"
+          ? "denied"
+          : "undetermined";
+      const permissionAction = getNotificationPermissionAction(
+        permissionState,
+        hasRequestedPermission,
+        isLaterCycle,
+      );
+
+      if (permissionAction === "request") {
+        const shouldContinue = await confirmNotificationPermission();
+        if (!shouldContinue) {
+          setNotificationMessage(
+            "La sesión continuará. Sin permiso, no recibirás avisos con la aplicación cerrada.",
+          );
+          return;
+        }
+
+        await markNotificationPermissionRequested();
+        if (permission.canAskAgain) {
+          permission = await notifications.requestPermissionsAsync();
+        }
+      } else if (permissionAction === "explain") {
+        setNotificationMessage(
+          "Para recibir avisos, activa las notificaciones de la aplicación en Ajustes. El temporizador seguirá funcionando.",
+        );
+        return;
+      }
+
+      if (!permission.granted) {
+        setNotificationMessage(
+          "Las notificaciones están desactivadas. La sesión continuará y verás la fase terminada al volver.",
+        );
+        return;
+      }
+
+      setNotificationMessage("");
+      const scheduled = await scheduleCompletionNotification(
+        startedSession,
+        notifications,
+      );
       if (!scheduled) {
         setNotificationMessage(
-          "Las notificaciones están desactivadas. La sesión continuará y verás el aviso al volver.",
+          "No se pudo programar el aviso. La sesión continuará y verás la fase terminada al volver.",
         );
       }
-    });
+    } catch {
+      setNotificationMessage(
+        "No se pudo configurar el aviso. La sesión continuará y verás la fase terminada al volver.",
+      );
+    }
   }
 
   function handlePause() {
@@ -228,7 +387,7 @@ export function SessionControls() {
     setSession(resumedSession);
     setNotificationMessage("");
     void saveSession(resumedSession);
-    void scheduleCompletionNotification(resumedSession).then((scheduled) => {
+    void scheduleIfPermissionGranted(resumedSession).then((scheduled) => {
       if (!scheduled) {
         setNotificationMessage(
           "Las notificaciones están desactivadas. La sesión continuará y verás el aviso al volver.",
@@ -332,7 +491,13 @@ export function SessionControls() {
               accessibilityRole="button"
               accessibilityLabel={`Iniciar ${phaseLabel.toLowerCase()}`}
               disabled={!isLoaded}
-              onPress={handleStart}
+              onPress={() => {
+                const startedSession = startSession(session, Date.now());
+                setSession(startedSession);
+                setNotificationMessage("");
+                void saveSession(startedSession);
+                void prepareNotificationsForFirstStart(startedSession);
+              }}
               style={({ pressed }) => [
                 styles.primaryButton,
                 pressed && styles.pressed,
