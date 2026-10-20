@@ -6,6 +6,7 @@ import {
     loadSession,
     markNotificationCycleCompleted,
     markNotificationPermissionRequested,
+    resetNotificationStateForTesting,
     saveSession,
 } from "./session-storage";
 
@@ -13,6 +14,7 @@ jest.mock("@react-native-async-storage/async-storage", () => ({
   __esModule: true,
   default: {
     getItem: jest.fn(),
+    removeItem: jest.fn(),
     setItem: jest.fn(),
   },
 }));
@@ -186,6 +188,23 @@ describe("session storage", () => {
     expect(mockedStorage.setItem).toHaveBeenCalledWith(
       "@app_pomodoro/notification-cycle-completed",
       "true",
+    );
+  });
+
+  it("resets only notification test flags without deleting the saved session", async () => {
+    await resetNotificationStateForTesting();
+
+    expect(mockedStorage.removeItem).toHaveBeenNthCalledWith(
+      1,
+      "@app_pomodoro/notification-permission-requested",
+    );
+    expect(mockedStorage.removeItem).toHaveBeenNthCalledWith(
+      2,
+      "@app_pomodoro/notification-cycle-completed",
+    );
+    expect(mockedStorage.removeItem).toHaveBeenCalledTimes(2);
+    expect(mockedStorage.removeItem).not.toHaveBeenCalledWith(
+      "@app_pomodoro/session",
     );
   });
 });

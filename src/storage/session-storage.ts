@@ -31,6 +31,11 @@ export async function markNotificationCycleCompleted(): Promise<void> {
   await AsyncStorage.setItem(NOTIFICATION_CYCLE_COMPLETED_KEY, "true");
 }
 
+export async function resetNotificationStateForTesting(): Promise<void> {
+  await AsyncStorage.removeItem(NOTIFICATION_PERMISSION_REQUESTED_KEY);
+  await AsyncStorage.removeItem(NOTIFICATION_CYCLE_COMPLETED_KEY);
+}
+
 export async function saveSession(session: Session): Promise<void> {
   await AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
 }

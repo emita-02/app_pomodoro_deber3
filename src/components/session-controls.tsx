@@ -5,6 +5,7 @@ import {
     Alert,
     AppState,
     Image,
+    Platform,
     Pressable,
     StyleSheet,
     Text,
@@ -29,11 +30,14 @@ import {
     loadSession,
     markNotificationCycleCompleted,
     markNotificationPermissionRequested,
+    resetNotificationStateForTesting,
     saveSession,
 } from "@/storage/session-storage";
 
 const STUDY_DURATION_MS = 25 * 60 * 1000;
-const NOTIFICATION_CHANNEL_ID = "session-completion-v2";
+const NOTIFICATION_CHANNEL_ID = "session-completion-v3";
+const NOTIFICATION_CATEGORY_ID = "sessionCompletion";
+const NOTIFICATION_STOP_ACTION_ID = "stop";
 
 type NotificationsModule = typeof import("expo-notifications");
 
@@ -57,9 +61,18 @@ async function configureNotifications(
     }),
   });
 
+  await notifications.setNotificationCategoryAsync(NOTIFICATION_CATEGORY_ID, [
+    {
+      identifier: NOTIFICATION_STOP_ACTION_ID,
+      buttonTitle: "Detener",
+      options: { opensAppToForeground: true },
+    },
+  ]);
+
   await notifications.setNotificationChannelAsync(NOTIFICATION_CHANNEL_ID, {
     name: "Sesión de estudio",
-    importance: notifications.AndroidImportance.DEFAULT,
+    importance: notifications.AndroidImportance.HIGH,
+    lockscreenVisibility: notifications.AndroidNotificationVisibility.PUBLIC,
     sound: "default",
     enableVibrate: true,
     vibrationPattern: [0, 250, 250, 250],
@@ -79,6 +92,10 @@ async function scheduleCompletionNotification(
         title: "Sesión terminada",
         body: `Finalizó ${getPhaseLabel(session.phase).toLowerCase()}.`,
         data: { type: "session-completion" },
+        categoryIdentifier: NOTIFICATION_CATEGORY_ID,
+        sound: "default",
+        priority: notifications.AndroidNotificationPriority.HIGH,
+        vibrate: [0, 250, 250, 250],
       },
       trigger: {
         type: notifications.SchedulableTriggerInputTypes.DATE,
@@ -204,15 +221,47 @@ export function SessionControls() {
   }, []);
 
   useEffect(() => {
+    if (Platform.OS === "web") {
+      return;
+    }
+
     let isMounted = true;
     let responseSubscription: { remove: () => void } | undefined;
+    let handledResponseIdentifier: string | null = null;
 
-    function restoreSessionFromNotice() {
+    function handleCompletionResponse(
+      notifications: NotificationsModule,
+      response: import("expo-notifications").NotificationResponse,
+    ) {
+      const isCompletionNotification =
+        response.notification.request.content.data?.type ===
+        "session-completion";
+      const isOpenAction =
+        response.actionIdentifier === notifications.DEFAULT_ACTION_IDENTIFIER ||
+        response.actionIdentifier === NOTIFICATION_STOP_ACTION_ID;
+
+      if (!isCompletionNotification || !isOpenAction) {
+        return;
+      }
+
+      const responseIdentifier = response.notification.request.identifier;
+      if (responseIdentifier === handledResponseIdentifier) {
+        return;
+      }
+      handledResponseIdentifier = responseIdentifier;
+
       void loadSession(Date.now()).then((restoredSession) => {
         if (isMounted && restoredSession) {
           setSession(restoredSession);
         }
       });
+
+      void notifications
+        .dismissNotificationAsync(response.notification.request.identifier)
+        .catch(() => undefined);
+      void notifications
+        .clearLastNotificationResponseAsync()
+        .catch(() => undefined);
     }
 
     void loadNotifications().then(async (notifications) => {
@@ -221,29 +270,14 @@ export function SessionControls() {
       }
 
       responseSubscription =
-        notifications.addNotificationResponseReceivedListener((response) => {
-          if (
-            response.actionIdentifier ===
-              notifications.DEFAULT_ACTION_IDENTIFIER &&
-            response.notification.request.content.data?.type ===
-              "session-completion"
-          ) {
-            restoreSessionFromNotice();
-            void notifications.clearLastNotificationResponseAsync();
-          }
-        });
+        notifications.addNotificationResponseReceivedListener((response) =>
+          handleCompletionResponse(notifications, response),
+        );
 
       const lastResponse =
         await notifications.getLastNotificationResponseAsync();
-      if (
-        isMounted &&
-        lastResponse?.actionIdentifier ===
-          notifications.DEFAULT_ACTION_IDENTIFIER &&
-        lastResponse.notification.request.content.data?.type ===
-          "session-completion"
-      ) {
-        restoreSessionFromNotice();
-        void notifications.clearLastNotificationResponseAsync();
+      if (isMounted && lastResponse) {
+        handleCompletionResponse(notifications, lastResponse);
       }
     });
 
@@ -418,6 +452,34 @@ export function SessionControls() {
     );
   }
 
+  function handleResetNotificationStateForTesting() {
+    Alert.alert(
+      "Restablecer prueba de notificaciones",
+      "Se borrarán solo las marcas locales de notificaciones. La sesión y su configuración no cambiarán. El permiso de Android debe restablecerse por separado en Ajustes.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Restablecer",
+          style: "destructive",
+          onPress: () => {
+            void resetNotificationStateForTesting()
+              .then(() => {
+                setNotificationMessage(
+                  "Estado local restablecido. Revisa el permiso de notificaciones de Expo Go en Ajustes de Android antes de probar de nuevo.",
+                );
+              })
+              .catch(() => {
+                setNotificationMessage(
+                  "No se pudo restablecer el estado local de notificaciones.",
+                );
+              });
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  }
+
   const imageSource =
     session.phase === "study"
       ? require("@/assets/images/puma_estudiando.png")
@@ -522,6 +584,18 @@ export function SessionControls() {
             </Pressable>
           )}
         </View>
+        {__DEV__ && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Restablecer marcas de prueba de notificaciones"
+            onPress={handleResetNotificationStateForTesting}
+            style={styles.testResetButton}
+          >
+            <Text style={[styles.testResetButtonText, { fontFamily }]}>
+              Restablecer notificaciones (prueba)
+            </Text>
+          </Pressable>
+        )}
       </View>
     </SafeAreaView>
   );
@@ -602,6 +676,17 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: "#F2D194",
     fontSize: 21,
+  },
+  testResetButton: {
+    minHeight: 44,
+    justifyContent: "center",
+    marginTop: 12,
+  },
+  testResetButtonText: {
+    color: "#F2D194",
+    fontSize: 14,
+    textAlign: "center",
+    textDecorationLine: "underline",
   },
   pressed: {
     opacity: 0.75,

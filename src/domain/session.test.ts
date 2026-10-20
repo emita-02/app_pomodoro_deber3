@@ -327,4 +327,15 @@ describe("notification permission policy", () => {
       "explain",
     );
   });
+
+  it("keeps the session start available when notification permission is denied", () => {
+    const session = createSession({ durationMs: 2_500 });
+
+    expect(getNotificationPermissionAction("denied", true, false)).toBe("none");
+    expect(startSession(session, 1_000)).toMatchObject({
+      status: "running",
+      isRunning: true,
+      lastUpdatedAt: 1_000,
+    });
+  });
 });
