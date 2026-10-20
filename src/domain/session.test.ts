@@ -1,4 +1,5 @@
 import {
+    applySettingsToSession,
     advanceSession,
     createSession,
     getNotificationPermissionAction,
@@ -9,6 +10,7 @@ import {
     startSession,
     syncSessionState,
 } from "./session";
+import { DEFAULT_SETTINGS } from "./settings";
 
 describe("createSession", () => {
   it("creates a prepared study session with the cycle configuration", () => {
@@ -21,6 +23,8 @@ describe("createSession", () => {
       shortBreakDurationMs: 5 * 60 * 1000,
       longBreakDurationMs: 15 * 60 * 1000,
       pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 4,
+      cycleStarted: false,
       status: "prepared",
       isRunning: false,
       isPaused: false,
@@ -56,6 +60,7 @@ describe("startSession and advanceSession", () => {
       ...session,
       status: "running",
       isRunning: true,
+      cycleStarted: true,
       lastUpdatedAt: 1_000,
     });
   });
@@ -249,6 +254,266 @@ describe("study phase transitions", () => {
   });
 });
 
+describe("applySettingsToSession", () => {
+  it("applies settings to a prepared phase before the first cycle starts", () => {
+    const session = createSession({ durationMs: 25 * 60 * 1000 });
+
+    expect(
+      applySettingsToSession(session, {
+        studyDurationMinutes: 30,
+        shortBreakDurationMinutes: 8,
+        longBreakDurationMinutes: 20,
+        pomodorosPerCycle: 6,
+      }),
+    ).toMatchObject({
+      studyDurationMs: 30 * 60 * 1000,
+      durationMs: 30 * 60 * 1000,
+      remainingMs: 30 * 60 * 1000,
+      shortBreakDurationMs: 8 * 60 * 1000,
+      longBreakDurationMs: 20 * 60 * 1000,
+      pomodorosPerCycle: 6,
+      pendingPomodorosPerCycle: 6,
+      cycleStarted: false,
+    });
+  });
+
+  it("keeps the running phase snapshot and uses new durations for future phases", () => {
+    const started = startSession(
+      createSession({ durationMs: 25 * 60 * 1000 }),
+      0,
+    );
+    const updated = applySettingsToSession(started, {
+      studyDurationMinutes: 40,
+      shortBreakDurationMinutes: 8,
+      longBreakDurationMinutes: 20,
+      pomodorosPerCycle: 6,
+    });
+
+    expect(updated).toMatchObject({
+      durationMs: 25 * 60 * 1000,
+      remainingMs: 25 * 60 * 1000,
+      studyDurationMs: 40 * 60 * 1000,
+      shortBreakDurationMs: 8 * 60 * 1000,
+      longBreakDurationMs: 20 * 60 * 1000,
+      cycleStarted: true,
+    });
+    expect(advanceSession(updated, 25 * 60 * 1000)).toMatchObject({
+      phase: "shortBreak",
+      durationMs: 8 * 60 * 1000,
+      remainingMs: 8 * 60 * 1000,
+    });
+  });
+
+  it("keeps the active cycle threshold and adopts the pending value after long break", () => {
+    const started = startSession(
+      {
+        ...createSession({
+          durationMs: 60_000,
+          longBreakDurationMs: 900_000,
+          pomodorosPerCycle: 6,
+        }),
+        pomodorosCompleted: 5,
+      },
+      0,
+    );
+    const updated = applySettingsToSession(started, {
+      ...DEFAULT_SETTINGS,
+      pomodorosPerCycle: 2,
+    });
+
+    expect(updated).toMatchObject({
+      pomodorosPerCycle: 6,
+      pendingPomodorosPerCycle: 2,
+    });
+
+    const preparedLongBreak = advanceSession(updated, 60_000);
+    expect(preparedLongBreak).toMatchObject({
+      phase: "longBreak",
+      pomodorosPerCycle: 6,
+      pendingPomodorosPerCycle: 2,
+    });
+
+    expect(advanceSession(startSession(preparedLongBreak, 60_000), 960_000))
+      .toMatchObject({
+        phase: "study",
+        pomodorosCompleted: 0,
+        pomodorosPerCycle: 2,
+        pendingPomodorosPerCycle: 2,
+        cycleStarted: false,
+      });
+  });
+
+  it("preserves the active phase and cycle when restoring default settings", () => {
+    const session = startSession(
+      {
+        ...createSession({
+          durationMs: 30 * 60 * 1000,
+          pomodorosPerCycle: 6,
+        }),
+        remainingMs: 20 * 60 * 1000,
+        pomodorosCompleted: 2,
+      },
+      1_000,
+    );
+
+    expect(applySettingsToSession(session, DEFAULT_SETTINGS)).toMatchObject({
+      durationMs: 30 * 60 * 1000,
+      remainingMs: 20 * 60 * 1000,
+      pomodorosPerCycle: 6,
+      pendingPomodorosPerCycle: 4,
+      studyDurationMs: 25 * 60 * 1000,
+      shortBreakDurationMs: 5 * 60 * 1000,
+      longBreakDurationMs: 15 * 60 * 1000,
+    });
+  });
+});
+
+describe("applying saved settings to an active session", () => {
+  const newSettings = {
+    studyDurationMinutes: 40,
+    shortBreakDurationMinutes: 10,
+    longBreakDurationMinutes: 30,
+    pomodorosPerCycle: 6,
+  };
+
+  it("keeps the snapshot and remaining time of a paused phase", () => {
+    const paused = pauseSession(
+      startSession(createSession({ durationMs: 25 * 60 * 1000 }), 0),
+      5 * 60 * 1000,
+    );
+
+    const updated = applySettingsToSession(paused, newSettings);
+
+    expect(updated).toMatchObject({
+      status: "paused",
+      isPaused: true,
+      durationMs: 25 * 60 * 1000,
+      remainingMs: 20 * 60 * 1000,
+      studyDurationMs: 40 * 60 * 1000,
+      shortBreakDurationMs: 10 * 60 * 1000,
+      longBreakDurationMs: 30 * 60 * 1000,
+      pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 6,
+    });
+  });
+
+  it("uses the new break duration when the study phase ended before the change", () => {
+    const started = startSession(createSession({ durationMs: 60_000 }), 0);
+    const synced = syncSessionState(started, 60_000);
+
+    expect(synced).toMatchObject({
+      phase: "shortBreak",
+      durationMs: 5 * 60 * 1000,
+      status: "prepared",
+    });
+    expect(applySettingsToSession(synced, newSettings)).toMatchObject({
+      phase: "shortBreak",
+      durationMs: 10 * 60 * 1000,
+      remainingMs: 10 * 60 * 1000,
+      status: "prepared",
+      isRunning: false,
+    });
+  });
+
+  it("does not start a prepared phase when settings are applied", () => {
+    const prepared = createSession({ durationMs: 25 * 60 * 1000 });
+
+    expect(applySettingsToSession(prepared, newSettings)).toMatchObject({
+      status: "prepared",
+      isRunning: false,
+      lastUpdatedAt: null,
+    });
+  });
+
+  it("returns the same session when the same settings are applied again", () => {
+    const once = applySettingsToSession(
+      startSession(createSession({ durationMs: 60_000 }), 0),
+      newSettings,
+    );
+
+    expect(applySettingsToSession(once, newSettings)).toEqual(once);
+  });
+});
+
+describe("cycle size while the cycle has not started", () => {
+  const sixPomodoros = { ...DEFAULT_SETTINGS, pomodorosPerCycle: 6 };
+
+  it("applies a new cycle size after the first study timer was started and reset", () => {
+    const started = startSession(createSession({ durationMs: 25 * 60_000 }), 0);
+    const reset = resetSession(started, true);
+
+    expect(applySettingsToSession(reset, sixPomodoros)).toMatchObject({
+      pomodorosPerCycle: 6,
+      pendingPomodorosPerCycle: 6,
+      cycleStarted: false,
+    });
+  });
+
+  it("keeps the cycle size while the study timer is running", () => {
+    const started = startSession(createSession({ durationMs: 25 * 60_000 }), 0);
+
+    expect(applySettingsToSession(started, sixPomodoros)).toMatchObject({
+      pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 6,
+    });
+  });
+
+  it("keeps the cycle size while the study timer is paused", () => {
+    const paused = pauseSession(
+      startSession(createSession({ durationMs: 25 * 60_000 }), 0),
+      1_000,
+    );
+
+    expect(applySettingsToSession(paused, sixPomodoros)).toMatchObject({
+      pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 6,
+    });
+  });
+
+  it("keeps the cycle size once a pomodoro is completed, even with a stale flag", () => {
+    const session = {
+      ...createSession({ durationMs: 25 * 60_000 }),
+      pomodorosCompleted: 1,
+      cycleStarted: false,
+    };
+
+    expect(applySettingsToSession(session, sixPomodoros)).toMatchObject({
+      pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 6,
+      cycleStarted: true,
+    });
+  });
+
+  it("adopts the pending cycle size when an untouched cycle is reset", () => {
+    const running = applySettingsToSession(
+      startSession(createSession({ durationMs: 25 * 60_000 }), 0),
+      sixPomodoros,
+    );
+
+    expect(resetSession(running, true)).toMatchObject({
+      pomodorosPerCycle: 6,
+      pendingPomodorosPerCycle: 6,
+      cycleStarted: false,
+    });
+  });
+
+  it("keeps the active cycle size when resetting in the middle of a cycle", () => {
+    const running = applySettingsToSession(
+      startSession(
+        { ...createSession({ durationMs: 25 * 60_000 }), pomodorosCompleted: 2 },
+        0,
+      ),
+      sixPomodoros,
+    );
+
+    expect(resetSession(running, true)).toMatchObject({
+      pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 6,
+      cycleStarted: true,
+    });
+  });
+});
+
 describe("pauseSession and resumeSession", () => {
   it("preserves remaining time during pause and resumes from that amount", () => {
     const started = startSession(createSession({ durationMs: 2_500 }), 1_000);
@@ -292,6 +557,7 @@ describe("resetSession", () => {
     expect(resetSession(paused, true)).toEqual({
       ...paused,
       remainingMs: 2_500,
+      cycleStarted: false,
       status: "prepared",
       isRunning: false,
       isPaused: false,

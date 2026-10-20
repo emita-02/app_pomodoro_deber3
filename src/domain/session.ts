@@ -1,3 +1,5 @@
+import type { Settings } from "./settings";
+
 export type SessionPhase = "study" | "shortBreak" | "longBreak";
 
 export type SessionStatus = "prepared" | "running" | "paused" | "completed";
@@ -11,6 +13,8 @@ export interface Session {
   shortBreakDurationMs: number;
   longBreakDurationMs: number;
   pomodorosPerCycle: number;
+  pendingPomodorosPerCycle?: number;
+  cycleStarted?: boolean;
   status: SessionStatus;
   isRunning: boolean;
   isPaused: boolean;
@@ -55,6 +59,8 @@ export function createSession(config: SessionConfig): Session {
     shortBreakDurationMs: config.shortBreakDurationMs ?? 5 * 60 * 1000,
     longBreakDurationMs: config.longBreakDurationMs ?? 15 * 60 * 1000,
     pomodorosPerCycle: config.pomodorosPerCycle ?? 4,
+    pendingPomodorosPerCycle: config.pomodorosPerCycle ?? 4,
+    cycleStarted: false,
     status: "prepared",
     isRunning: false,
     isPaused: false,
@@ -76,6 +82,7 @@ export function startSession(session: Session, now: number): Session {
     isRunning: true,
     isPaused: false,
     isCompleted: false,
+    cycleStarted: true,
     lastUpdatedAt: now,
   };
 }
@@ -84,6 +91,10 @@ function prepareNextPhase(session: Session): Session {
   let phase: SessionPhase;
   let pomodorosCompleted = session.pomodorosCompleted;
   let durationMs: number;
+  let pomodorosPerCycle = session.pomodorosPerCycle;
+  let pendingPomodorosPerCycle =
+    session.pendingPomodorosPerCycle ?? session.pomodorosPerCycle;
+  let cycleStarted = session.cycleStarted ?? false;
 
   if (session.phase === "study") {
     phase =
@@ -99,12 +110,21 @@ function prepareNextPhase(session: Session): Session {
     durationMs = session.studyDurationMs;
     pomodorosCompleted =
       session.phase === "shortBreak" ? pomodorosCompleted + 1 : 0;
+
+    if (session.phase === "longBreak") {
+      pomodorosPerCycle = pendingPomodorosPerCycle;
+      pendingPomodorosPerCycle = pomodorosPerCycle;
+      cycleStarted = false;
+    }
   }
 
   return {
     ...session,
     phase,
     pomodorosCompleted,
+    pomodorosPerCycle,
+    pendingPomodorosPerCycle,
+    cycleStarted,
     durationMs,
     remainingMs: durationMs,
     status: "prepared",
@@ -112,6 +132,47 @@ function prepareNextPhase(session: Session): Session {
     isPaused: false,
     isCompleted: true,
     lastUpdatedAt: null,
+  };
+}
+
+export function applySettingsToSession(
+  session: Session,
+  settings: Settings,
+): Session {
+  // El ciclo no ha comenzado si es estudio con 0 pomodoros y sin temporizador
+  // corriendo ni en pausa (también tras iniciar y reiniciar). Se deduce del
+  // estado y no de la bandera guardada (decisión 10, RF-10).
+  const cycleStarted =
+    session.phase !== "study" ||
+    session.pomodorosCompleted > 0 ||
+    session.isRunning ||
+    session.isPaused;
+  const studyDurationMs = settings.studyDurationMinutes * 60_000;
+  const shortBreakDurationMs = settings.shortBreakDurationMinutes * 60_000;
+  const longBreakDurationMs = settings.longBreakDurationMinutes * 60_000;
+  const isPhasePrepared =
+    session.status === "prepared" || session.status === "completed";
+
+  const durationMs = isPhasePrepared
+    ? session.phase === "study"
+      ? studyDurationMs
+      : session.phase === "shortBreak"
+        ? shortBreakDurationMs
+        : longBreakDurationMs
+    : session.durationMs;
+
+  return {
+    ...session,
+    studyDurationMs,
+    shortBreakDurationMs,
+    longBreakDurationMs,
+    durationMs,
+    remainingMs: isPhasePrepared ? durationMs : session.remainingMs,
+    pomodorosPerCycle: cycleStarted
+      ? session.pomodorosPerCycle
+      : settings.pomodorosPerCycle,
+    pendingPomodorosPerCycle: settings.pomodorosPerCycle,
+    cycleStarted,
   };
 }
 
@@ -175,8 +236,19 @@ export function resetSession(session: Session, confirmed: boolean): Session {
     return session;
   }
 
+  const isCycleUntouched =
+    session.phase === "study" && session.pomodorosCompleted === 0;
+
   return {
     ...session,
+    // Un reinicio que devuelve el ciclo a 0 adopta el valor pendiente.
+    ...(isCycleUntouched
+      ? {
+          pomodorosPerCycle:
+            session.pendingPomodorosPerCycle ?? session.pomodorosPerCycle,
+          cycleStarted: false,
+        }
+      : {}),
     remainingMs: session.durationMs,
     status: "prepared",
     isRunning: false,

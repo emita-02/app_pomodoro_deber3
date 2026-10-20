@@ -63,3 +63,20 @@
 **Respuesta:** Mostrar un error claro indicando que los cambios no se guardaron, conservar los valores editados en pantalla para reintentar y no presentarlos como aplicados.
 
 **Motivo:** El estudiante puede distinguir entre cambios guardados y no guardados, y reintentar sin volver a introducirlos.
+
+## 9. Validación numérica y aviso de rango
+
+**Pregunta:** ¿Qué valores se aceptan y qué aviso se muestra cuando se ingresa un valor fuera de rango?
+
+**Respuesta:** Solo se aceptan valores numéricos enteros. Si se ingresa un número menor o mayor que el rango permitido, se muestra junto al campo un aviso que indica que solo se aceptan valores numéricos enteros dentro de su rango: estudio, de 1 a 120; descanso corto, de 1 a 60; descanso largo, de 1 a 120; pomodoros por ciclo, de 1 a 12.
+
+**Motivo:** El aviso identifica los valores enteros que se pueden ingresar en cada campo y permite corregir el dato inválido.
+
+## 10. Cantidad de pomodoros mientras el ciclo no ha comenzado
+
+**Pregunta:** ¿Cuándo se aplica de inmediato un cambio en los pomodoros por ciclo y cuándo se conserva el valor del ciclo?
+
+**Respuesta:** Si el ciclo ya comenzó, se conserva su cantidad de pomodoros. Mientras el ciclo siga en 0 y no se haya iniciado el temporizador de la sesión de estudio, el nuevo valor de los ajustes debe aplicarse de inmediato. Se considera que el ciclo no ha comenzado cuando la fase es de estudio, hay 0 pomodoros completados y el temporizador no está corriendo ni en pausa, incluso si el estudiante lo inició antes y lo reinició.
+
+**Motivo:** Precisa la decisión 7. El estudiante espera ver reflejado el cambio antes de empezar a estudiar, y un reinicio que devuelve el ciclo a 0 no debe dejar fijo el valor anterior.
+

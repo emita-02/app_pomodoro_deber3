@@ -51,15 +51,29 @@ function normalizeSession(stored: Partial<Session>): Session {
           ? "running"
           : "prepared");
 
+  const phase = stored.phase ?? "study";
+  const pomodorosCompleted = stored.pomodorosCompleted ?? 0;
+  const pomodorosPerCycle = stored.pomodorosPerCycle ?? 4;
+
   return {
     studyDurationMs: stored.studyDurationMs ?? stored.durationMs!,
     durationMs: stored.durationMs!,
     remainingMs: stored.remainingMs!,
-    phase: stored.phase ?? "study",
-    pomodorosCompleted: stored.pomodorosCompleted ?? 0,
+    phase,
+    pomodorosCompleted,
     shortBreakDurationMs: stored.shortBreakDurationMs ?? 5 * 60 * 1000,
     longBreakDurationMs: stored.longBreakDurationMs ?? 15 * 60 * 1000,
-    pomodorosPerCycle: stored.pomodorosPerCycle ?? 4,
+    pomodorosPerCycle,
+    // Instantáneas de ciclo (HU-005): se conservan si existen; en sesiones
+    // guardadas antes de HU-005 se derivan sin alterar la fase ni el ciclo.
+    pendingPomodorosPerCycle:
+      stored.pendingPomodorosPerCycle ?? pomodorosPerCycle,
+    cycleStarted:
+      stored.cycleStarted ??
+      (phase !== "study" ||
+        pomodorosCompleted > 0 ||
+        status === "running" ||
+        status === "paused"),
     status,
     isRunning: stored.isRunning ?? status === "running",
     isPaused: stored.isPaused ?? status === "paused",

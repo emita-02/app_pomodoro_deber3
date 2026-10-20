@@ -167,6 +167,89 @@ describe("session storage", () => {
     await expect(loadSession(9_000)).resolves.toEqual(restored);
   });
 
+  it("keeps the pending cycle threshold and cycle-started flag of a paused session", async () => {
+    const paused: Session = {
+      ...createSession({ durationMs: 10_000, pomodorosPerCycle: 6 }),
+      pomodorosPerCycle: 6,
+      pendingPomodorosPerCycle: 2,
+      cycleStarted: true,
+      remainingMs: 6_000,
+      status: "paused",
+      isPaused: true,
+      lastUpdatedAt: 1_000,
+    };
+    mockedStorage.getItem.mockResolvedValue(JSON.stringify(paused));
+
+    await expect(loadSession(9_000)).resolves.toEqual(paused);
+    expect(mockedStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it("keeps the active cycle threshold when recovering a running session after time away", async () => {
+    const running = startSession(
+      {
+        ...createSession({ durationMs: 60_000, pomodorosPerCycle: 6 }),
+        pendingPomodorosPerCycle: 2,
+      },
+      0,
+    );
+    mockedStorage.getItem.mockResolvedValue(JSON.stringify(running));
+
+    await expect(loadSession(10_000)).resolves.toMatchObject({
+      pomodorosPerCycle: 6,
+      pendingPomodorosPerCycle: 2,
+      cycleStarted: true,
+      remainingMs: 50_000,
+    });
+  });
+
+  it("derives the pending threshold and cycle-started flag for sessions saved before they existed", async () => {
+    mockedStorage.getItem.mockResolvedValue(
+      JSON.stringify({
+        studyDurationMs: 60_000,
+        durationMs: 900_000,
+        remainingMs: 900_000,
+        phase: "longBreak",
+        pomodorosCompleted: 3,
+        shortBreakDurationMs: 300_000,
+        longBreakDurationMs: 900_000,
+        pomodorosPerCycle: 4,
+        status: "prepared",
+        isRunning: false,
+        isPaused: false,
+        isCompleted: true,
+        lastUpdatedAt: null,
+      }),
+    );
+
+    await expect(loadSession(9_000)).resolves.toMatchObject({
+      phase: "longBreak",
+      pomodorosCompleted: 3,
+      remainingMs: 900_000,
+      pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 4,
+      cycleStarted: true,
+    });
+  });
+
+  it("treats a legacy untouched study snapshot as a cycle that has not started", async () => {
+    mockedStorage.getItem.mockResolvedValue(
+      JSON.stringify({
+        durationMs: 10_000,
+        remainingMs: 10_000,
+        isRunning: false,
+        isPaused: false,
+        isCompleted: false,
+        lastUpdatedAt: null,
+      }),
+    );
+
+    await expect(loadSession(9_000)).resolves.toMatchObject({
+      pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 4,
+      cycleStarted: false,
+    });
+  });
+
   it("returns null when no session has been saved", async () => {
     mockedStorage.getItem.mockResolvedValue(null);
 

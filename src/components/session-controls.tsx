@@ -15,6 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
     advanceSession,
+    applySettingsToSession,
     createSession,
     getNotificationPermissionAction,
     pauseSession,
@@ -22,8 +23,10 @@ import {
     resumeSession,
     shouldShowCompleted,
     startSession,
+    syncSessionState,
     type Session,
 } from "@/domain/session";
+import { useSettings } from "@/context/settings-context";
 import {
     hasCompletedNotificationCycle,
     hasRequestedNotificationPermission,
@@ -182,6 +185,7 @@ function getCompletedPhaseLabel(session: Session): string {
 
 export function SessionControls() {
   const [fontsLoaded] = useFonts({ CraftyGirls_400Regular });
+  const { settings, status: settingsStatus } = useSettings();
   const [session, setSession] = useState<Session>(() =>
     createSession({ durationMs: STUDY_DURATION_MS }),
   );
@@ -195,6 +199,29 @@ export function SessionControls() {
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
+
+  useEffect(() => {
+    // Los ajustes se aplican solo cuando la sesión y los ajustes ya cargaron.
+    // Primero se sincroniza con el tiempo real transcurrido; después se
+    // actualizan las duraciones futuras sin tocar la fase ni el ciclo en curso.
+    if (!isLoaded || settingsStatus !== "ready") {
+      return;
+    }
+
+    const current = sessionRef.current;
+    const updated = applySettingsToSession(
+      syncSessionState(current, Date.now()),
+      settings,
+    );
+
+    if (JSON.stringify(updated) === JSON.stringify(current)) {
+      return;
+    }
+
+    sessionRef.current = updated;
+    setSession(updated);
+    void saveSession(updated);
+  }, [isLoaded, settingsStatus, settings]);
 
   useEffect(() => {
     let isMounted = true;
@@ -552,7 +579,7 @@ export function SessionControls() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Iniciar ${phaseLabel.toLowerCase()}`}
-              disabled={!isLoaded}
+              disabled={!isLoaded || settingsStatus === "loading"}
               onPress={() => {
                 const startedSession = startSession(session, Date.now());
                 setSession(startedSession);
