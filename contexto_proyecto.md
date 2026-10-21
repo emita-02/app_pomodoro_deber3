@@ -958,11 +958,13 @@ Estado del trabajo entre sesiones. Máximo ~50 líneas.
 
 - HU-003 queda cerrada tras implementar sus tareas y confirmar manualmente bloqueo, cierre, aviso y pausa.
 - La spec HU-004 está aprobada y planificada en ocho tareas. T1 completada; T3 completada fuera de orden. T4 (canal v3) y T6 (acción «Detener») tienen implementación provisional, pendientes de prueba física. T5 sigue pendiente de validación manual; T2 pendiente. T7 bloqueada: Expo SDK 57 no expone callback de descarte Android.
-- HU-005: T1 y T2 completadas; validación de ajustes y persistencia local implementadas.
+- HU-005: T1 y T2 completadas. T3–T7 entregados; T6/T7 probados parcialmente en Expo Go. Se añadió la decisión 10 (RF-10, tarea T3b): la cantidad de pomodoros se aplica de inmediato si el ciclo no ha comenzado. Pendiente: `npx jest`, repetir `npx expo lint` (se corrigió use-color-scheme.web.ts) y probar T3b en Expo Go. T8 sin ejecutar.
+- HU-006: sin decisiones.md todavía; falta la ronda de grill-me.
 
 ## Próximos pasos
 
-- Continuar HU-005 con T3: aplicar cambios en los límites de fase y ciclo.
+- HU-005 (sdd-implement): ejecutar `npx jest`, `npx tsc --noEmit` y `npx expo lint`; marcar T3–T5 si pasan; probar T6/T7 en Expo Go con la lista de rn-conventions; después T8.
+- HU-006 (grill-me, luego sdd-spec): responder la ronda de decisiones para generar decisiones.md.
 - Para HU-004, pedir decisión para RF-4/T7: conservar el requisito y aprobar evaluar una integración Android nativa, o modificar el comportamiento mediante una actualización aprobada de spec/plan. Después resolver el entorno compatible y validar T2, T4 y T6; validar también T5.
 
 
@@ -2987,6 +2989,15 @@ No hay dudas abiertas.
 
 **Motivo:** El aviso identifica los valores enteros que se pueden ingresar en cada campo y permite corregir el dato inválido.
 
+## 10. Cantidad de pomodoros mientras el ciclo no ha comenzado
+
+**Pregunta:** ¿Cuándo se aplica de inmediato un cambio en los pomodoros por ciclo y cuándo se conserva el valor del ciclo?
+
+**Respuesta:** Si el ciclo ya comenzó, se conserva su cantidad de pomodoros. Mientras el ciclo siga en 0 y no se haya iniciado el temporizador de la sesión de estudio, el nuevo valor de los ajustes debe aplicarse de inmediato. Se considera que el ciclo no ha comenzado cuando la fase es de estudio, hay 0 pomodoros completados y el temporizador no está corriendo ni en pausa, incluso si el estudiante lo inició antes y lo reinició.
+
+**Motivo:** Precisa la decisión 7. El estudiante espera ver reflejado el cambio antes de empezar a estudiar, y un reinicio que devuelve el ciclo a 0 no debe dejar fijo el valor anterior.
+
+
 
 ================================================
 ðŸ“„ ARCHIVO: specs\005-ajustar-tiempos\plan.md
@@ -3032,7 +3043,7 @@ En `src/domain/session.ts`:
 - `applySettingsToSession`: recibe la sesión y los ajustes nuevos para preparar los valores futuros de cada fase/ciclo.
 - La duración y el tiempo restante de la fase actual no se recalculan.
 - El umbral de pomodoros activo se conserva desde que comienza el ciclo hasta que termina el descanso largo; `pendingPomodorosPerCycle` guarda el último valor configurado para el ciclo siguiente.
-- Si aún no comenzó el primer ciclo, los ajustes se aplican antes de iniciar ese ciclo.
+- El ciclo se considera no comenzado cuando la fase es de estudio, hay 0 pomodoros completados y el temporizador no corre ni está en pausa (decisión 10, RF-10). Esto se deduce del estado de la sesión, no de una bandera guardada, de modo que un reinicio que devuelve el estudio a 0 también cuenta. En ese caso los ajustes se aplican de inmediato y el reinicio adopta el valor pendiente.
 - Al completar el descanso largo, el valor pendiente pasa a ser el umbral activo del ciclo que comienza y el pendiente se sincroniza con la configuración vigente.
 - Restablecer usa los mismos límites de aplicación que guardar otros ajustes; no reinicia ni completa la fase o ciclo.
 
@@ -3078,8 +3089,12 @@ al recibir una configuración nueva o recuperar una sesión:
   actualizar las duraciones futuras, sin alterar duration/remaining de la fase actual
   si el ciclo ya comenzó:
     mantener el umbral de ese ciclo y guardar el nuevo umbral en pendingPomodorosPerCycle
-  si aún no comenzó el primer ciclo:
-    aplicar el umbral actual antes de iniciar
+  si el ciclo no ha comenzado (estudio, 0 completados, sin correr ni pausa):
+    aplicar el umbral nuevo de inmediato
+
+al reiniciar con confirmación:
+  si el ciclo no ha comenzado: adoptar el umbral pendiente
+  si no: conservar el umbral activo
   al terminar el descanso largo:
     adoptar pendingPomodorosPerCycle para el ciclo que empieza
   guardar la sesión actualizada sin convertir una fase preparada en ejecución
@@ -3155,6 +3170,7 @@ Como estudiante, quiero cambiar la duración del estudio, de los descansos y la 
 - **Fase en curso:** período de estudio o descanso cuyo temporizador ya está corriendo.
 - **Próxima fase del mismo tipo:** la siguiente vez que comience una fase de estudio, descanso corto o descanso largo del tipo cuya duración se modificó.
 - **Ciclo en curso:** ciclo de pomodoros que ya comenzó. Un nuevo número de pomodoros por ciclo se aplica al ciclo siguiente.
+- **Ciclo no comenzado:** ciclo con 0 pomodoros completados, en fase de estudio y con el temporizador ni corriendo ni en pausa. Un reinicio confirmado que devuelve el estudio a 0 deja el ciclo como no comenzado.
 
 ## Requisitos funcionales
 
@@ -3163,6 +3179,7 @@ Como estudiante, quiero cambiar la duración del estudio, de los descansos y la 
 - **RF-3:** CUANDO el estudiante guarde ajustes válidos, EL SISTEMA conservará los valores para que sigan disponibles y vigentes después de cerrar y volver a abrir la aplicación. Origen: HU-005, escenario «Cambiar un tiempo».
 - **RF-4:** CUANDO el estudiante cambie la duración de un tipo de fase, EL SISTEMA mantendrá la duración con la que comenzó cualquier fase de ese tipo que ya esté en curso y aplicará el nuevo valor la próxima vez que comience una fase de ese mismo tipo. Origen: HU-005, escenario «Cambiar un tiempo con una fase en curso»; decisiones.md, decisión 6.
 - **RF-5:** CUANDO el estudiante cambie la cantidad de pomodoros por ciclo mientras un ciclo está en curso, EL SISTEMA mantendrá para ese ciclo la cantidad con la que comenzó y aplicará el nuevo valor desde el ciclo siguiente. Origen: decisiones.md, decisión 7.
+- **RF-10:** MIENTRAS el ciclo no haya comenzado, CUANDO el estudiante cambie la cantidad de pomodoros por ciclo, EL SISTEMA mostrará y usará el nuevo valor de inmediato. Origen: decisiones.md, decisión 10.
 - **RF-6:** CUANDO el estudiante elija «Restablecer», EL SISTEMA mostrará una confirmación que explique que se reemplazarán los cuatro ajustes por sus valores predeterminados y ofrecerá las opciones «Cancelar» y «Restablecer», con «Cancelar» seleccionada por defecto. Origen: HU-005, escenario «Volver a los valores por defecto»; decisiones.md, decisión 5.
 - **RF-7:** CUANDO el estudiante cancele la confirmación de restablecimiento, EL SISTEMA conservará sin cambios los valores de los ajustes. Origen: decisiones.md, decisión 5.
 - **RF-8:** CUANDO el estudiante confirme el restablecimiento, EL SISTEMA guardará inmediatamente los valores predeterminados de 25 minutos de estudio, 5 minutos de descanso corto, 15 minutos de descanso largo y 4 pomodoros por ciclo, sin requerir otro guardado; su efecto sobre una fase o ciclo en curso respetará RF-4 y RF-5. Origen: HU-005, escenario «Volver a los valores por defecto»; decisiones.md, decisiones 4, 6 y 7.
@@ -3179,6 +3196,7 @@ Como estudiante, quiero cambiar la duración del estudio, de los descansos y la 
 - Las duraciones deben ser números enteros de minutos; no se aceptan fracciones, conforme a RF-1.
 - Un cambio de duración no altera la fase de ese tipo que ya está en curso.
 - Un cambio en la cantidad de pomodoros no altera el ciclo que ya está en curso.
+- Un cambio en la cantidad de pomodoros se aplica de inmediato si el ciclo no ha comenzado, incluso después de iniciar y reiniciar el estudio (RF-10).
 - Si falla el guardado, los valores editados permanecen disponibles en pantalla y no se consideran aplicados.
 
 ## Fuera de alcance
@@ -3197,6 +3215,7 @@ Como estudiante, quiero cambiar la duración del estudio, de los descansos y la 
 
 No hay dudas abiertas.
 
+
 ================================================
 ðŸ“„ ARCHIVO: specs\005-ajustar-tiempos\tasks.md
 ================================================
@@ -3209,23 +3228,473 @@ No hay dudas abiertas.
 - [x] **T2. Persistir los ajustes localmente.** RF-3, RF-8, RF-9
   - Hecho cuando: `settings-storage.ts` carga valores predeterminados si no hay datos, guarda y recupera los cuatro ajustes y propaga errores de escritura; `npx jest` verifica guardado, recarga, restablecimiento y fallo.
 
-- [ ] **T3. Aplicar cambios en límites de fase y ciclo.** RF-4, RF-5, RF-8
+- [x] **T3. Aplicar cambios en límites de fase y ciclo.** RF-4, RF-5, RF-8
   - Hecho cuando: las funciones puras de sesión conservan duración y umbral activos, aplican cambios a la próxima fase del mismo tipo/al siguiente ciclo y cubren el caso previo al primer ciclo; `npx jest` pasa esos escenarios y el de restablecimiento.
 
-- [ ] **T4. Recuperar instantáneas de sesión compatibles.** RF-4, RF-5
+- [x] **T3b. Aplicar de inmediato la cantidad de pomodoros si el ciclo no ha comenzado.** RF-5, RF-10
+  - Hecho cuando: el ciclo no comenzado se deduce del estado (estudio, 0 completados, sin correr ni pausa); cambiar los pomodoros en ese estado se aplica al instante, también tras iniciar y reiniciar; reiniciar adopta el valor pendiente; con el ciclo comenzado se conserva el valor activo; `npx jest` pasa esos escenarios.
+
+- [x] **T4. Recuperar instantáneas de sesión compatibles.** RF-4, RF-5
   - Hecho cuando: la carga de sesiones antiguas normaliza los campos añadidos sin alterar fases/ciclos activos; `npx jest` pasa pruebas de sesión nueva, sesión antigua y recuperación de instantáneas.
 
-- [ ] **T5. Compartir los ajustes y aplicarlos a la sesión activa.** RF-3, RF-4, RF-5, RF-8
+- [x] **T5. Compartir los ajustes y aplicarlos a la sesión activa.** RF-3, RF-4, RF-5, RF-8
   - Hecho cuando: la configuración cargada al inicio se comparte con ambas pantallas y un guardado exitoso actualiza Inicio al instante; no cambia el tiempo de la fase activa ni el umbral del ciclo iniciado, y la siguiente fase/ciclo usa los nuevos valores; `npx jest` pasa las pruebas de actualización de sesión.
 
-- [ ] **T6. Crear formulario y acceso a Ajustes.** RF-1, RF-2
+- [x] **T6. Crear formulario y acceso a Ajustes.** RF-1, RF-2
   - Hecho cuando: la ruta Ajustes presenta los cuatro campos, valida y muestra junto a cada campo inválido el rango correcto, y queda accesible desde pestañas nativa/web; en Expo Go se comprueban manualmente campos, mensajes, legibilidad en vertical/horizontal, paleta, Crafty Girls y accesibilidad de controles.
 
-- [ ] **T7. Conectar guardar y restablecer en la interfaz.** RF-3, RF-6, RF-7, RF-8, RF-9
+- [x] **T7. Conectar guardar y restablecer en la interfaz.** RF-3, RF-6, RF-7, RF-8, RF-9
   - Hecho cuando: Guardar persiste solo valores válidos; Restablecer solicita confirmación con Cancelar predeterminado, cancelarlo no cambia ajustes y confirmarlo guarda inmediatamente los cuatro predeterminados; ante error se avisa que no se guardó y se conservan los valores editados. Confirmar manualmente en Expo Go, incluyendo reapertura y reintento.
 
-- [ ] **T8. Verificar regresión y cobertura de la spec.** RF-1–RF-9
+- [x] **T8. Verificar regresión y cobertura de la spec.** RF-1–RF-9
   - Hecho cuando: `npx jest`, `npx tsc --noEmit` y `npx expo lint` terminan sin errores, y la lista manual de rn-conventions confirma el flujo de ajustes en Android Expo Go, incluida recuperación después de cerrar y abrir la app.
+
+
+================================================
+ðŸ“„ ARCHIVO: specs\006-uso-libre\decisiones.md
+================================================
+
+# Decisiones de la HU-006 — Uso sin registro, internet ni publicidad
+
+## Contexto
+
+La HU-006 busca que los estudiantes puedan utilizar el Temporizador Pomodoro de la Academia Cotopaxi desde la primera apertura, sin crear una cuenta, sin depender de una conexión a internet y sin interrupciones publicitarias.
+
+Las siguientes decisiones concretan el comportamiento esperado antes de redactar la especificación.
+
+## D-001: Acceso directo a la aplicación
+
+**Decisión:** La aplicación abrirá directamente la pantalla principal del temporizador, incluso en el primer inicio.
+
+**Justificación:** El estudiante debe poder comenzar a utilizar la aplicación sin pasos previos innecesarios.
+
+**Consecuencias:**
+- No se solicitará crear una cuenta ni iniciar sesión.
+- No se mostrará una pantalla de bienvenida obligatoria antes del temporizador.
+
+## D-002: Funcionamiento sin conexión
+
+**Decisión:** Las funciones principales del temporizador, los ajustes y los avisos de finalización deberán funcionar sin conexión a internet.
+
+**Justificación:** El estudiante debe poder estudiar aunque no tenga datos móviles ni acceso a una red wifi.
+
+**Consecuencias:**
+- El funcionamiento principal no dependerá de un servidor.
+- Los avisos de finalización deberán apoyarse en mecanismos locales del dispositivo, coordinados con la HU-004.
+- La aplicación no deberá necesitar conexión para consultar o utilizar los ajustes guardados.
+
+## D-003: Persistencia local de los ajustes
+
+**Decisión:** Los ajustes del usuario se guardarán en el dispositivo y estarán disponibles al volver a abrir la aplicación, sin requerir conexión a internet.
+
+**Justificación:** El estudiante no debería tener que configurar nuevamente sus tiempos cada vez que abre la aplicación.
+
+**Consecuencias:**
+- La configuración se conservará entre aperturas de la aplicación.
+- Esta decisión se coordinará con la HU-003, que define la recuperación de la sesión del temporizador.
+
+## D-004: Ausencia de publicidad
+
+**Decisión:** La aplicación no mostrará publicidad en ninguna de sus pantallas.
+
+**Justificación:** El objetivo es ofrecer una experiencia de estudio sin interrupciones.
+
+**Consecuencias:**
+- No aparecerán anuncios, banners ni ventanas emergentes publicitarias.
+- No se incorporarán servicios o SDK destinados a mostrar anuncios.
+
+## D-005: Independencia de servicios externos para las funciones principales
+
+**Decisión:** Las funciones principales de la aplicación no dependerán de servicios externos ni de una conexión a internet para funcionar.
+
+**Justificación:** El temporizador debe seguir siendo útil en entornos sin conectividad.
+
+**Consecuencias:**
+- El funcionamiento básico deberá resolverse en el dispositivo.
+- Esta decisión no prohíbe por sí sola posibles funciones futuras que utilicen internet, siempre que sean aprobadas y no impidan el funcionamiento principal sin conexión.
+
+## Relación con otras historias
+
+- **HU-003:** Coordinar la persistencia y recuperación de la sesión cuando se cierra y vuelve a abrir la aplicación.
+- **HU-004:** Coordinar los avisos locales de finalización y su funcionamiento sin conexión.
+- **HU-005:** Mantener la configuración de los tiempos disponible sin conexión.
+
+## Estado
+
+Decisiones aceptadas por la usuaria. Pendiente redactar y revisar `spec.md` antes de generar el plan y las tareas.
+
+================================================
+ðŸ“„ ARCHIVO: specs\006-uso-libre\plan.md
+================================================
+
+# Plan de la historia 006 - Uso libre
+
+## Alcance
+
+- Se planifican RF-1 a RF-7 de la spec aprobada.
+- Se reutilizan las pantallas, la lógica del temporizador, los avisos y el almacenamiento local existentes.
+- No se incorporan cuentas, registro, autenticación, servicios externos ni publicidad.
+- La implementación debe mantener el comportamiento de las historias anteriores, especialmente la recuperación de sesión, los ajustes y los avisos de finalización.
+- Las decisiones de producto se toman de `decisiones.md`: D-001, D-002, D-003, D-004 y D-005.
+- Antes de modificar archivos, se revisará su contenido actual para evitar duplicar funciones o cambiar comportamientos ya implementados.
+
+## 1. Archivos y responsabilidades
+
+- `src/app/index.tsx`
+  - Mantener el acceso directo al temporizador al abrir la aplicación.
+  - Evitar introducir pantallas de bienvenida, registro o inicio de sesión como requisito para utilizar la aplicación.
+  - Cubre RF-1.
+
+- `src/app/` (pantalla o ruta existente de ajustes)
+  - Mantener accesibles los ajustes sin conexión a internet.
+  - Mostrar los estados de carga o error de lectura de los ajustes sin afirmar que se guardaron correctamente cuando no sea así.
+  - Cubre RF-4 y RF-5.
+
+- `src/domain/settings.ts`
+  - Reutilizar la definición existente de los ajustes y sus valores predeterminados.
+  - No introducir dependencias de red en la lógica de configuración.
+  - Cubre RF-4 y RF-5.
+
+- `src/storage/settings-storage.ts`
+  - Reutilizar el almacenamiento local de los ajustes.
+  - Confirmar que guardar y recuperar los valores no depende de una conexión a internet.
+  - No cambiar el formato de almacenamiento si no es necesario.
+  - Cubre RF-4 y RF-5.
+
+- `src/storage/settings-storage.test.ts`
+  - Verificar que los ajustes se guardan y recuperan correctamente mediante el almacenamiento local.
+  - Cubrir los resultados de lectura y escritura necesarios para demostrar que la aplicación no afirma haber guardado datos cuando la operación falla.
+  - Cubre RF-4 y RF-5.
+
+- `src/context/settings-context.tsx`
+  - Reutilizar el contexto actual para cargar y actualizar los ajustes.
+  - Mantener el comportamiento existente ante errores de lectura y escritura.
+  - Cubre RF-4 y RF-5.
+
+- `src/domain/session.ts`
+  - Reutilizar la lógica existente de sesión y sus funciones puras.
+  - Confirmar que el temporizador y sus transiciones no necesitan servicios externos para funcionar.
+  - No duplicar ni reemplazar la lógica de las HU anteriores.
+  - Cubre RF-2 y RF-7.
+
+- `src/domain/session.test.ts`
+  - Verificar con Jest los comportamientos de sesión necesarios para confirmar que el temporizador funciona sin conexión y conserva las reglas actuales.
+  - Cubre RF-2 y RF-7.
+
+- `src/components/session-controls.tsx`
+  - Reutilizar el flujo existente de avisos de finalización.
+  - Confirmar que los avisos locales no requieren conexión a internet y que se mantiene el comportamiento definido en HU-004.
+  - Cubre RF-3 y RF-7.
+
+- `src/app/` y componentes de las pantallas existentes
+  - Revisar todas las pantallas y componentes visibles para confirmar que no se presentan anuncios, banners ni ventanas publicitarias.
+  - No añadir SDK, componentes ni servicios de publicidad.
+  - Cubre RF-6 y RF-7.
+
+No se prevén archivos nuevos ni dependencias adicionales. Si la revisión detecta que un requisito ya está implementado, se conservará ese comportamiento y se añadirá o ajustará la verificación que falte, en lugar de reescribirlo.
+
+## 2. Funciones puras de lógica
+
+Se reutilizará la lógica de dominio existente y se evitará incorporar dependencias de red.
+
+- En `src/domain/session.ts`, se reutilizarán las funciones actuales para crear, iniciar, pausar, reanudar, sincronizar y finalizar una sesión.
+- En `src/domain/settings.ts`, se reutilizarán la definición de ajustes y los valores predeterminados existentes.
+- No se crearán funciones nuevas para registro, autenticación, publicidad o acceso a servicios externos.
+
+Las pruebas de dominio deberán demostrar que las operaciones necesarias del temporizador se resuelven con el estado local y no dependen de una respuesta de red.
+
+Cubre RF-2, RF-4 y RF-7.
+
+## 3. Persistencia
+
+La aplicación ya utiliza `@react-native-async-storage/async-storage` para guardar los ajustes y la sesión localmente.
+
+- Se reutilizará `src/storage/settings-storage.ts` para guardar y recuperar los ajustes.
+- Se conservará `src/storage/session-storage.ts` para el estado de la sesión, respetando las reglas definidas en las HU anteriores.
+- No se añadirá una base de datos remota ni sincronización obligatoria con un servidor.
+- Se comprobará el guardado y la recuperación de los ajustes después de cerrar y volver a abrir la aplicación.
+- Si el almacenamiento falla, no se declarará que los ajustes quedaron guardados.
+
+Las decisiones D-002 y D-003 establecen el funcionamiento sin conexión y la conservación local de los ajustes. La implementación debe respetar también el comportamiento de recuperación de sesión de las historias anteriores.
+
+Cubre RF-2, RF-3, RF-4, RF-5 y RF-7.
+
+## 4. Algoritmo en pseudocódigo
+
+### Inicio de la aplicación
+
+1. Abrir la aplicación.
+2. Mostrar directamente la pantalla principal del temporizador.
+3. Cargar el estado de la sesión y los ajustes locales.
+4. Si hay una sesión guardada, recuperarla según las reglas ya definidas.
+5. Si no hay ajustes guardados, utilizar los valores predeterminados existentes.
+6. Permitir el uso de la aplicación sin solicitar registro ni inicio de sesión.
+
+### Uso sin conexión
+
+1. El estudiante abre la aplicación sin conexión a internet.
+2. El sistema permite utilizar el temporizador con la lógica local existente.
+3. El sistema permite consultar y cambiar los ajustes.
+4. Al guardar, el sistema utiliza el almacenamiento local.
+5. Al reabrir la aplicación, el sistema recupera los ajustes guardados.
+6. Los avisos locales de finalización siguen el comportamiento establecido en HU-004, sin depender de servicios externos.
+
+### Ausencia de publicidad
+
+1. El estudiante navega por las pantallas disponibles.
+2. El sistema muestra únicamente el contenido funcional de la aplicación.
+3. No se presentan anuncios, banners ni ventanas publicitarias.
+
+Cubre RF-1 a RF-7.
+
+## 5. Presentación en la interfaz
+
+- Se conservará la pantalla principal existente y su acceso directo al temporizador.
+- Los ajustes seguirán disponibles desde la navegación actual.
+- Se respetarán los textos en español, los estilos y la lista manual de verificación de `rn-conventions`.
+- Los errores de almacenamiento se comunicarán sin afirmar que un cambio quedó guardado.
+- No se introducirán pantallas, banners ni ventanas publicitarias.
+- No se incorporarán pantallas de registro o inicio de sesión para habilitar las funciones principales.
+
+Cubre RF-1, RF-4, RF-5 y RF-6.
+
+## 6. Decisiones técnicas justificadas
+
+### D-001. Acceso directo al temporizador
+
+- Decisión: utilizar la navegación y la pantalla principal existentes.
+- Justificación: la historia requiere que el estudiante pueda empezar a usar la aplicación sin registro ni inicio de sesión.
+- Alternativa descartada: añadir un flujo obligatorio de bienvenida, registro o autenticación.
+
+### D-002. Funcionamiento sin conexión
+
+- Decisión: mantener la lógica del temporizador y los avisos locales sin dependencia obligatoria de internet.
+- Justificación: las funciones principales deben seguir disponibles sin datos móviles ni wifi.
+- Alternativa descartada: consultar un servicio remoto para iniciar el temporizador o completar sus funciones esenciales.
+
+### D-003. Persistencia local de los ajustes
+
+- Decisión: reutilizar `@react-native-async-storage/async-storage` y el almacenamiento de ajustes existente.
+- Justificación: el proyecto ya utiliza almacenamiento local y la historia requiere conservar los ajustes en el dispositivo.
+- Alternativa descartada: almacenar los ajustes exclusivamente en un servidor o añadir una sincronización obligatoria.
+
+### D-004. Ausencia de publicidad
+
+- Decisión: no incorporar servicios, SDK ni componentes publicitarios.
+- Justificación: la historia establece que no deben aparecer anuncios en ninguna pantalla.
+- Alternativa descartada: mostrar publicidad integrada, banners o ventanas emergentes.
+
+### D-005. Independencia de servicios externos
+
+- Decisión: mantener las funciones esenciales independientes de servicios externos. Cualquier función futura que use internet no debe bloquear el uso sin conexión.
+- Justificación: el temporizador, los ajustes y los avisos deben poder utilizarse sin conexión.
+- Alternativa descartada: hacer que las funciones principales dependan de un servidor o de una respuesta de red.
+
+## 7. Estrategia de pruebas con Jest
+
+### Pruebas de lógica
+
+- Ejecutar las pruebas existentes de `src/domain/session.test.ts`.
+- Verificar el funcionamiento de la sesión con el estado local y sin incorporar dependencias de red.
+- Comprobar que las transiciones y la recuperación mantienen las reglas definidas en las HU anteriores.
+- Ejecutar `npx jest` para verificar la suite de pruebas.
+
+### Pruebas de persistencia
+
+- Ejecutar las pruebas existentes de `src/storage/settings-storage.test.ts`.
+- Verificar el guardado y la recuperación de los ajustes.
+- Verificar que los errores de almacenamiento no se interpreten como un guardado exitoso.
+- Comprobar que la sesión continúa utilizando su almacenamiento actual sin cambios incompatibles.
+
+### Verificación manual
+
+La validación manual se realizará en el entorno móvil del proyecto, siguiendo la lista de `rn-conventions` cuando corresponda.
+
+- Instalar y abrir la aplicación por primera vez; confirmar que se muestra directamente el temporizador.
+- Activar el modo avión y comprobar el uso del temporizador, los ajustes y los avisos locales.
+- Cambiar y guardar los ajustes; cerrar y volver a abrir la aplicación; comprobar que se conservan.
+- Recorrer las pantallas disponibles y confirmar que no aparecen anuncios.
+- Confirmar que los cambios no alteran el comportamiento de la sesión ni los avisos definidos en las historias anteriores.
+
+Jest no sustituye la comprobación en un dispositivo o entorno móvil de que las funciones funcionan sin conexión ni la inspección visual de todas las pantallas.
+
+## 8. Cobertura por requisito
+
+- RF-1: acceso directo mediante la pantalla principal y la navegación existente; verificación manual de primera apertura.
+- RF-2: lógica local de sesión; pruebas de dominio y verificación manual sin conexión.
+- RF-3: avisos locales de finalización; revisión de la integración existente y verificación manual sin conexión.
+- RF-4: ajustes disponibles sin conexión; revisión del contexto y de la pantalla de ajustes, más verificación manual.
+- RF-5: persistencia local de los ajustes; pruebas de almacenamiento y comprobación después de cerrar y reabrir la aplicación.
+- RF-6: ausencia de publicidad; revisión de las pantallas y componentes existentes y comprobación manual de navegación.
+- RF-7: independencia de las funciones esenciales respecto de servicios externos; revisión de la lógica y de la persistencia, pruebas automatizadas y comprobación manual sin conexión.
+
+
+================================================
+ðŸ“„ ARCHIVO: specs\006-uso-libre\spec.md
+================================================
+
+# Spec 006 - Uso libre
+
+Estado: aprobada
+
+HU de origen: docs/historias/HU-006.md
+
+## Contexto y objetivo
+
+La aplicación Temporizador Pomodoro de la Academia Cotopaxi está dirigida a estudiantes que necesitan organizar sus sesiones de estudio y descanso.
+
+Esta historia busca que el estudiante pueda utilizar la aplicación desde la primera apertura, sin crear una cuenta, sin depender de una conexión a internet y sin interrupciones publicitarias.
+
+El objetivo es facilitar el acceso al temporizador y permitir su uso en entornos donde no hay conexión disponible.
+
+## Usuarios
+
+- **Estudiante:** persona que utiliza el temporizador para organizar sus sesiones de estudio y descanso.
+
+## Historias de usuario
+
+Como estudiante, quiero usar la aplicación apenas la instalo, sin crear una cuenta, sin datos móviles y sin anuncios, para empezar a estudiar sin trabas.
+
+## Definiciones
+
+- **Sin conexión:** uso de las funciones principales de la aplicación sin acceso a datos móviles ni wifi.
+- **Publicidad:** anuncios, banners o ventanas emergentes cuyo propósito sea promocionar productos o servicios.
+- **Ajustes:** configuración de las duraciones de estudio y descanso, y de la cantidad de pomodoros por ciclo.
+
+## Requisitos funcionales
+
+### RF-001: Acceso directo al temporizador
+
+CUANDO el estudiante abra la aplicación por primera vez después de instalarla, EL SISTEMA DEBERÁ mostrar directamente la pantalla principal del temporizador, sin exigir que cree una cuenta, inicie sesión o complete una pantalla de bienvenida obligatoria.
+
+**Origen:** Escenario «Abrir la aplicación por primera vez» de HU-006; decisión D-001 de `decisiones.md`.
+
+### RF-002: Uso del temporizador sin conexión
+
+MIENTRAS el dispositivo no tenga conexión a datos móviles ni wifi, EL SISTEMA DEBERÁ permitir al estudiante utilizar las funciones principales del temporizador.
+
+**Origen:** Escenario «Usarla sin conexión» de HU-006; decisiones D-002 y D-005 de `decisiones.md`.
+
+### RF-003: Avisos de finalización sin conexión
+
+CUANDO el temporizador termine una fase mientras el dispositivo no tenga conexión a internet, EL SISTEMA DEBERÁ mantener disponible el mecanismo de aviso de finalización definido para la aplicación, de acuerdo con los requisitos de la HU-004 y los permisos del dispositivo.
+
+**Origen:** Escenario «Usarla sin conexión» de HU-006; decisión D-002 de `decisiones.md`; HU-004, «Recibir aviso al terminar el tiempo».
+
+### RF-004: Uso de los ajustes sin conexión
+
+MIENTRAS el dispositivo no tenga conexión a internet, EL SISTEMA DEBERÁ permitir al estudiante consultar y modificar los ajustes del temporizador.
+
+**Origen:** Escenario «Usarla sin conexión» de HU-006; decisión D-002 de `decisiones.md`.
+
+### RF-005: Conservación de los ajustes
+
+CUANDO el estudiante guarde sus ajustes y cierre la aplicación, EL SISTEMA DEBERÁ conservar la configuración en el dispositivo para que esté disponible al volver a abrir la aplicación, sin requerir conexión a internet.
+
+**Origen:** Escenario «Usarla sin conexión» de HU-006; decisión D-003 de `decisiones.md`; HU-005, «Ajustar los tiempos del pomodoro».
+
+### RF-006: Ausencia de publicidad
+
+EL SISTEMA NO DEBERÁ mostrar anuncios, banners ni ventanas emergentes publicitarias en ninguna de las pantallas de la aplicación.
+
+**Origen:** Escenario «Usarla sin publicidad» de HU-006; decisión D-004 de `decisiones.md`.
+
+### RF-007: Independencia de servicios externos
+
+EL SISTEMA DEBERÁ permitir el funcionamiento de las funciones principales sin depender de servidores o servicios externos que requieran conexión a internet.
+
+**Origen:** Decisión D-005 de `decisiones.md`.
+
+## Requisitos no funcionales
+
+### RNF-001: Disponibilidad sin conexión
+
+La disponibilidad de las funciones principales no deberá depender de que el dispositivo tenga acceso a internet.
+
+**Origen:** Decisiones D-002 y D-005 de `decisiones.md`.
+
+### RNF-002: Persistencia local
+
+Los ajustes deberán mantenerse disponibles en el dispositivo después de cerrar y volver a abrir la aplicación, de acuerdo con la decisión D-003.
+
+**Origen:** Decisión D-003 de `decisiones.md`.
+
+### RNF-003: Experiencia sin publicidad
+
+La experiencia de uso deberá mantenerse libre de elementos publicitarios en todas las pantallas de la aplicación.
+
+**Origen:** Decisión D-004 de `decisiones.md`.
+
+## Casos límite
+
+- **Primera apertura sin conexión:** la aplicación deberá mostrar directamente el temporizador sin exigir conectividad ni registro.
+- **Cierre y reapertura sin conexión:** los ajustes guardados deberán seguir disponibles.
+- **Finalización de una fase sin conexión:** el mecanismo de aviso deberá respetar los requisitos de la HU-004 y los permisos del dispositivo.
+- **Pantallas sin publicidad:** ninguna pantalla deberá mostrar anuncios, incluidos banners o ventanas emergentes publicitarias.
+
+## Fuera de alcance
+
+- Crear cuentas, iniciar sesión o administrar perfiles de usuario.
+- Incorporar publicidad o servicios destinados a mostrar anuncios.
+- Incorporar nuevas funciones que dependan de internet y que no estén contempladas en las historias aprobadas.
+
+La posibilidad de incorporar funciones futuras que utilicen internet no queda prohibida por esta historia, siempre que sean aprobadas y no impidan el funcionamiento principal sin conexión.
+
+## Criterios de finalización
+
+- Al abrir la aplicación por primera vez, se muestra directamente el temporizador sin solicitar registro ni inicio de sesión.
+- El temporizador puede utilizarse sin datos móviles ni wifi.
+- Los avisos de finalización mantienen el comportamiento establecido en la HU-004 cuando no hay conexión.
+- Los ajustes pueden consultarse y modificarse sin conexión.
+- Los ajustes guardados se conservan al cerrar y volver a abrir la aplicación.
+-  Ninguna pantalla muestra anuncios, banners o ventanas emergentes publicitarias.
+- Las funciones principales no dependen de servicios externos que requieran conexión a internet.
+
+## Dudas abiertas
+
+No hay dudas abiertas.
+
+================================================
+ðŸ“„ ARCHIVO: specs\006-uso-libre\tasks.md
+================================================
+
+# Tareas de la historia 006 - Uso libre
+
+- [ ] **T1. Revisar el acceso inicial y las dependencias de las funciones principales. (25 min)** RF-1, RF-2, RF-3, RF-7
+  - Revisar la pantalla principal, la navegación, la lógica de sesión y los avisos existentes. Identificar si alguna función esencial depende de autenticación, servicios externos o conexión de red.
+  - Hecho cuando: queda identificado qué comportamiento ya cumple la spec y qué cambios son realmente necesarios; no se duplican pantallas ni lógica de las HU anteriores.
+
+- [ ] **T2. Verificar la persistencia local de los ajustes. (25 min)** RF-4, RF-5, RF-7
+  - Revisar `src/domain/settings.ts`, `src/storage/settings-storage.ts` y `src/context/settings-context.tsx`. Añadir o ajustar únicamente las pruebas necesarias para cubrir guardado, recuperación y errores de almacenamiento.
+  - Hecho cuando: las pruebas de `src/storage/settings-storage.test.ts` comprueban que los ajustes se guardan y recuperan correctamente, y que un fallo de escritura no se presenta como un guardado exitoso; `npx jest src/storage/settings-storage.test.ts` pasa.
+
+- [ ] **T3. Verificar el funcionamiento local del temporizador y los avisos. (25 min)** RF-2, RF-3, RF-7
+  - Revisar la lógica existente de sesión y el flujo de avisos locales. Añadir o ajustar pruebas de dominio solo si falta cobertura.
+  - Hecho cuando: las pruebas verifican que la lógica esencial de sesión no requiere una respuesta de red y que se mantienen las reglas de finalización y recuperación de las HU anteriores; `npx jest src/domain/session.test.ts` pasa.
+
+- [ ] **T4. Validar el acceso directo y los ajustes en la interfaz. (25 min)** RF-1, RF-4, RF-5
+  - Revisar la primera apertura de la aplicación y la pantalla existente de ajustes. Realizar cambios solo si se detecta una desviación de la spec.
+  - Hecho cuando: en la comprobación manual la aplicación abre directamente el temporizador, no exige registro ni inicio de sesión y permite consultar y guardar los ajustes desde la interfaz existente; se verifican los puntos aplicables de `rn-conventions`.
+
+- [ ] **T5. Validar la aplicación sin conexión y sin publicidad. (25 min)** RF-2, RF-3, RF-4, RF-5, RF-6, RF-7
+  - Realizar la prueba manual con el dispositivo sin conexión, comprobar los ajustes después de reabrir la aplicación y recorrer las pantallas disponibles.
+  - Hecho cuando: el temporizador, los avisos locales y los ajustes funcionan sin datos móviles ni wifi; los ajustes se conservan después de cerrar y reabrir la aplicación; no aparece publicidad en las pantallas; y se registra el resultado de la lista manual aplicable de `rn-conventions`.
+
+## Orden de dependencia
+
+1. T1
+2. T2
+3. T3
+4. T4
+5. T5
+
+## Notas de implementación
+
+- Las tareas de lógica y persistencia se verifican con `npx jest`.
+- Las tareas de interfaz y funcionamiento sin conexión requieren verificación manual en el entorno móvil del proyecto.
+- No se deben añadir dependencias ni servicios externos para resolver requisitos que ya pueden cubrirse con la lógica y el almacenamiento local existentes.
+- Si se detecta que una función esencial depende de internet o que un cambio altera el comportamiento visible definido en la spec aprobada, se debe detener la implementación y solicitar aclaración antes de cambiar el alcance.
+- Una tarea solo se marcará como completada cuando se cumpla su criterio de «Hecho cuando».
 
 
 ================================================
@@ -3426,6 +3895,344 @@ export default function HomeScreen() {
 
 
 ================================================
+ðŸ“„ ARCHIVO: src\app\settings.tsx
+================================================
+
+import { CraftyGirls_400Regular } from "@expo-google-fonts/crafty-girls";
+import { useFonts } from "expo-font";
+import { useState } from "react";
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { useSettings } from "@/context/settings-context";
+import {
+  DEFAULT_SETTINGS,
+  validateSettings,
+  type Settings,
+  type SettingsDraft,
+  type SettingsField,
+} from "@/domain/settings";
+
+const FIELDS: { key: SettingsField; label: string }[] = [
+  { key: "studyDurationMinutes", label: "Estudio (minutos)" },
+  { key: "shortBreakDurationMinutes", label: "Descanso corto (minutos)" },
+  { key: "longBreakDurationMinutes", label: "Descanso largo (minutos)" },
+  { key: "pomodorosPerCycle", label: "Pomodoros por ciclo" },
+];
+
+type Feedback = { kind: "success" | "error"; text: string };
+
+function toDraft(settings: Settings): SettingsDraft {
+  return {
+    studyDurationMinutes: String(settings.studyDurationMinutes),
+    shortBreakDurationMinutes: String(settings.shortBreakDurationMinutes),
+    longBreakDurationMinutes: String(settings.longBreakDurationMinutes),
+    pomodorosPerCycle: String(settings.pomodorosPerCycle),
+  };
+}
+
+export default function SettingsScreen() {
+  const { status } = useSettings();
+  const [fontsLoaded] = useFonts({ CraftyGirls_400Regular });
+  const fontFamily = fontsLoaded ? "CraftyGirls_400Regular" : "sans-serif";
+
+  if (status === "loading") {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.loading}>
+          <Text style={[styles.message, { fontFamily }]}>
+            Cargando ajustes...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return <SettingsForm fontFamily={fontFamily} />;
+}
+
+function SettingsForm({ fontFamily }: { fontFamily: string }) {
+  const { settings, status, updateSettings } = useSettings();
+  const [draft, setDraft] = useState<SettingsDraft>(() => toDraft(settings));
+  const [errors, setErrors] = useState<
+    Partial<Record<SettingsField, string>>
+  >({});
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  function handleChange(field: SettingsField, text: string) {
+    setDraft((current) => ({ ...current, [field]: text }));
+    setErrors((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+    setFeedback(null);
+  }
+
+  async function persist(next: Settings, successText: string) {
+    setIsSaving(true);
+    try {
+      // Se persiste primero; solo tras una escritura exitosa se presentan
+      // los valores como aplicados (RF-9).
+      await updateSettings(next);
+      setDraft(toDraft(next));
+      setErrors({});
+      setFeedback({ kind: "success", text: successText });
+    } catch {
+      // Los valores editados se conservan en pantalla para reintentar.
+      setFeedback({
+        kind: "error",
+        text: "No se pudieron guardar los cambios. Tus valores siguen en pantalla; inténtalo de nuevo.",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleSave() {
+    if (isSaving) {
+      return;
+    }
+
+    const result = validateSettings(draft);
+    if (result.settings === null) {
+      // Pantalla abierta, borrador intacto y nada se escribe (RF-2).
+      setErrors(result.errors);
+      setFeedback(null);
+      return;
+    }
+
+    await persist(
+      result.settings,
+      "Ajustes guardados. Una fase en curso termina con el tiempo con el que empezó.",
+    );
+  }
+
+  function handleResetPress() {
+    if (isSaving) {
+      return;
+    }
+
+    // «Cancelar» va primero y no hace nada: no cambia ningún valor (RF-6, RF-7).
+    Alert.alert(
+      "Restablecer ajustes",
+      "Se reemplazarán los cuatro ajustes por los valores predeterminados: 25 minutos de estudio, 5 de descanso corto, 15 de descanso largo y 4 pomodoros por ciclo.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Restablecer",
+          style: "destructive",
+          onPress: () => {
+            void persist(
+              DEFAULT_SETTINGS,
+              "Valores predeterminados restablecidos y guardados.",
+            );
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={[styles.brand, { fontFamily }]}>Academia Cotopaxi</Text>
+        <Text accessibilityRole="header" style={[styles.heading, { fontFamily }]}>
+          Ajustes
+        </Text>
+
+        {status === "error" && (
+          <Text style={[styles.message, { fontFamily }]}>
+            No se pudieron leer los ajustes guardados. Se muestran los valores
+            predeterminados.
+          </Text>
+        )}
+
+        {FIELDS.map(({ key, label }) => {
+          const error = errors[key];
+          return (
+            <View key={key} style={styles.field}>
+              <Text style={[styles.label, { fontFamily }]}>{label}</Text>
+              <TextInput
+                accessibilityLabel={label}
+                inputMode="numeric"
+                keyboardType="number-pad"
+                onChangeText={(text) => handleChange(key, text)}
+                style={[
+                  styles.input,
+                  error !== undefined && styles.inputInvalid,
+                  { fontFamily },
+                ]}
+                value={draft[key]}
+              />
+              {error !== undefined && (
+                <Text
+                  accessibilityLiveRegion="polite"
+                  style={[styles.error, { fontFamily }]}
+                >
+                  {error}
+                </Text>
+              )}
+            </View>
+          );
+        })}
+
+        {feedback !== null && (
+          <Text
+            accessibilityLiveRegion="polite"
+            style={[
+              styles.message,
+              feedback.kind === "error" && styles.messageError,
+              { fontFamily },
+            ]}
+          >
+            {feedback.text}
+          </Text>
+        )}
+
+        <View style={styles.actions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Guardar ajustes"
+            accessibilityState={{ disabled: isSaving }}
+            disabled={isSaving}
+            onPress={() => void handleSave()}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={[styles.primaryButtonText, { fontFamily }]}>
+              Guardar
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Restablecer ajustes a los valores predeterminados"
+            accessibilityState={{ disabled: isSaving }}
+            disabled={isSaving}
+            onPress={handleResetPress}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={[styles.secondaryButtonText, { fontFamily }]}>
+              Restablecer
+            </Text>
+          </Pressable>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#141759",
+  },
+  loading: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  content: {
+    paddingHorizontal: 24,
+    paddingVertical: 24,
+    gap: 16,
+  },
+  brand: {
+    color: "#F2D194",
+    fontSize: 22,
+    textAlign: "center",
+  },
+  heading: {
+    color: "#F2F2F2",
+    fontSize: 30,
+    textAlign: "center",
+  },
+  field: {
+    gap: 6,
+  },
+  label: {
+    color: "#F2D194",
+    fontSize: 18,
+  },
+  input: {
+    minHeight: 48,
+    backgroundColor: "#F2F2F2",
+    color: "#141759",
+    fontSize: 20,
+    paddingHorizontal: 12,
+    borderWidth: 2,
+    borderColor: "#F2F2F2",
+  },
+  inputInvalid: {
+    borderColor: "#D9A91A",
+  },
+  error: {
+    color: "#F2D194",
+    fontSize: 16,
+  },
+  message: {
+    color: "#F2F2F2",
+    fontSize: 17,
+    textAlign: "center",
+  },
+  messageError: {
+    color: "#F2D194",
+  },
+  actions: {
+    alignItems: "center",
+    gap: 12,
+    marginTop: 8,
+  },
+  primaryButton: {
+    minWidth: 180,
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#D9A91A",
+    paddingHorizontal: 24,
+  },
+  primaryButtonText: {
+    color: "#141759",
+    fontSize: 21,
+  },
+  secondaryButton: {
+    minWidth: 180,
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#F2D194",
+    paddingHorizontal: 24,
+  },
+  secondaryButtonText: {
+    color: "#F2D194",
+    fontSize: 21,
+  },
+  pressed: {
+    opacity: 0.75,
+  },
+});
+
+
+================================================
 ðŸ“„ ARCHIVO: src\app\_layout.tsx
 ================================================
 
@@ -3435,6 +4242,7 @@ import { useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AppTabs from '@/components/app-tabs';
+import { SettingsProvider } from '@/context/settings-context';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -3442,8 +4250,10 @@ export default function TabLayout() {
   const colorScheme = useColorScheme();
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
+      <SettingsProvider>
+        <AnimatedSplashOverlay />
+        <AppTabs />
+      </SettingsProvider>
     </ThemeProvider>
   );
 }
@@ -3763,6 +4573,18 @@ export default function AppTabs() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: "Ajustes",
+          tabBarIcon: ({ color, size }) => (
+            <Image
+              source={require("@/assets/images/tabIcons/explore.png")}
+              style={{ width: size, height: size, tintColor: color }}
+            />
+          ),
+        }}
+      />
     </Tabs>
   );
 }
@@ -3800,6 +4622,9 @@ export default function AppTabs() {
           </TabTrigger>
           <TabTrigger name="explore" href="/explore" asChild>
             <TabButton>Explore</TabButton>
+          </TabTrigger>
+          <TabTrigger name="settings" href="/settings" asChild>
+            <TabButton>Ajustes</TabButton>
           </TabTrigger>
         </CustomTabList>
       </TabList>
@@ -3982,6 +4807,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
     advanceSession,
+    applySettingsToSession,
     createSession,
     getNotificationPermissionAction,
     pauseSession,
@@ -3989,8 +4815,10 @@ import {
     resumeSession,
     shouldShowCompleted,
     startSession,
+    syncSessionState,
     type Session,
 } from "@/domain/session";
+import { useSettings } from "@/context/settings-context";
 import {
     hasCompletedNotificationCycle,
     hasRequestedNotificationPermission,
@@ -4149,6 +4977,7 @@ function getCompletedPhaseLabel(session: Session): string {
 
 export function SessionControls() {
   const [fontsLoaded] = useFonts({ CraftyGirls_400Regular });
+  const { settings, status: settingsStatus } = useSettings();
   const [session, setSession] = useState<Session>(() =>
     createSession({ durationMs: STUDY_DURATION_MS }),
   );
@@ -4162,6 +4991,29 @@ export function SessionControls() {
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
+
+  useEffect(() => {
+    // Los ajustes se aplican solo cuando la sesión y los ajustes ya cargaron.
+    // Primero se sincroniza con el tiempo real transcurrido; después se
+    // actualizan las duraciones futuras sin tocar la fase ni el ciclo en curso.
+    if (!isLoaded || settingsStatus !== "ready") {
+      return;
+    }
+
+    const current = sessionRef.current;
+    const updated = applySettingsToSession(
+      syncSessionState(current, Date.now()),
+      settings,
+    );
+
+    if (JSON.stringify(updated) === JSON.stringify(current)) {
+      return;
+    }
+
+    sessionRef.current = updated;
+    setSession(updated);
+    void saveSession(updated);
+  }, [isLoaded, settingsStatus, settings]);
 
   useEffect(() => {
     let isMounted = true;
@@ -4519,7 +5371,7 @@ export function SessionControls() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Iniciar ${phaseLabel.toLowerCase()}`}
-              disabled={!isLoaded}
+              disabled={!isLoaded || settingsStatus === "loading"}
               onPress={() => {
                 const startedSession = startSession(session, Date.now());
                 setSession(startedSession);
@@ -4942,6 +5794,92 @@ export const MaxContentWidth = 800;
 
 
 ================================================
+ðŸ“„ ARCHIVO: src\context\settings-context.tsx
+================================================
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+
+import { DEFAULT_SETTINGS, type Settings } from "@/domain/settings";
+import { loadSettings, saveSettings } from "@/storage/settings-storage";
+
+// "loading": leyendo el almacenamiento. "ready": ajustes cargados (guardados o
+// predeterminados). "error": falló la lectura; se usan los predeterminados pero
+// NO se afirma que la configuración guardada se haya cargado.
+export type SettingsStatus = "loading" | "ready" | "error";
+
+interface SettingsContextValue {
+  settings: Settings;
+  status: SettingsStatus;
+  // Persiste primero; solo si la escritura tiene éxito publica los nuevos
+  // valores. Si falla, propaga el error y deja intactos los ajustes aplicados.
+  updateSettings: (next: Settings) => Promise<void>;
+}
+
+const SettingsContext = createContext<SettingsContextValue | null>(null);
+
+export function SettingsProvider({ children }: { children: ReactNode }) {
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [status, setStatus] = useState<SettingsStatus>("loading");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    loadSettings()
+      .then((loaded) => {
+        if (isMounted) {
+          setSettings(loaded);
+          setStatus("ready");
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setStatus("error");
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const updateSettings = useCallback(async (next: Settings) => {
+    await saveSettings(next);
+    setSettings(next);
+    setStatus("ready");
+  }, []);
+
+  const value = useMemo(
+    () => ({ settings, status, updateSettings }),
+    [settings, status, updateSettings],
+  );
+
+  return (
+    <SettingsContext.Provider value={value}>
+      {children}
+    </SettingsContext.Provider>
+  );
+}
+
+export function useSettings(): SettingsContextValue {
+  const context = useContext(SettingsContext);
+
+  if (context === null) {
+    throw new Error("useSettings debe usarse dentro de SettingsProvider.");
+  }
+
+  return context;
+}
+
+
+================================================
 ðŸ“„ ARCHIVO: src\domain\session.test.ts
 ================================================
 
@@ -5007,6 +5945,7 @@ describe("startSession and advanceSession", () => {
       ...session,
       status: "running",
       isRunning: true,
+      cycleStarted: true,
       lastUpdatedAt: 1_000,
     });
   });
@@ -5314,6 +6253,152 @@ describe("applySettingsToSession", () => {
   });
 });
 
+describe("applying saved settings to an active session", () => {
+  const newSettings = {
+    studyDurationMinutes: 40,
+    shortBreakDurationMinutes: 10,
+    longBreakDurationMinutes: 30,
+    pomodorosPerCycle: 6,
+  };
+
+  it("keeps the snapshot and remaining time of a paused phase", () => {
+    const paused = pauseSession(
+      startSession(createSession({ durationMs: 25 * 60 * 1000 }), 0),
+      5 * 60 * 1000,
+    );
+
+    const updated = applySettingsToSession(paused, newSettings);
+
+    expect(updated).toMatchObject({
+      status: "paused",
+      isPaused: true,
+      durationMs: 25 * 60 * 1000,
+      remainingMs: 20 * 60 * 1000,
+      studyDurationMs: 40 * 60 * 1000,
+      shortBreakDurationMs: 10 * 60 * 1000,
+      longBreakDurationMs: 30 * 60 * 1000,
+      pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 6,
+    });
+  });
+
+  it("uses the new break duration when the study phase ended before the change", () => {
+    const started = startSession(createSession({ durationMs: 60_000 }), 0);
+    const synced = syncSessionState(started, 60_000);
+
+    expect(synced).toMatchObject({
+      phase: "shortBreak",
+      durationMs: 5 * 60 * 1000,
+      status: "prepared",
+    });
+    expect(applySettingsToSession(synced, newSettings)).toMatchObject({
+      phase: "shortBreak",
+      durationMs: 10 * 60 * 1000,
+      remainingMs: 10 * 60 * 1000,
+      status: "prepared",
+      isRunning: false,
+    });
+  });
+
+  it("does not start a prepared phase when settings are applied", () => {
+    const prepared = createSession({ durationMs: 25 * 60 * 1000 });
+
+    expect(applySettingsToSession(prepared, newSettings)).toMatchObject({
+      status: "prepared",
+      isRunning: false,
+      lastUpdatedAt: null,
+    });
+  });
+
+  it("returns the same session when the same settings are applied again", () => {
+    const once = applySettingsToSession(
+      startSession(createSession({ durationMs: 60_000 }), 0),
+      newSettings,
+    );
+
+    expect(applySettingsToSession(once, newSettings)).toEqual(once);
+  });
+});
+
+describe("cycle size while the cycle has not started", () => {
+  const sixPomodoros = { ...DEFAULT_SETTINGS, pomodorosPerCycle: 6 };
+
+  it("applies a new cycle size after the first study timer was started and reset", () => {
+    const started = startSession(createSession({ durationMs: 25 * 60_000 }), 0);
+    const reset = resetSession(started, true);
+
+    expect(applySettingsToSession(reset, sixPomodoros)).toMatchObject({
+      pomodorosPerCycle: 6,
+      pendingPomodorosPerCycle: 6,
+      cycleStarted: false,
+    });
+  });
+
+  it("keeps the cycle size while the study timer is running", () => {
+    const started = startSession(createSession({ durationMs: 25 * 60_000 }), 0);
+
+    expect(applySettingsToSession(started, sixPomodoros)).toMatchObject({
+      pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 6,
+    });
+  });
+
+  it("keeps the cycle size while the study timer is paused", () => {
+    const paused = pauseSession(
+      startSession(createSession({ durationMs: 25 * 60_000 }), 0),
+      1_000,
+    );
+
+    expect(applySettingsToSession(paused, sixPomodoros)).toMatchObject({
+      pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 6,
+    });
+  });
+
+  it("keeps the cycle size once a pomodoro is completed, even with a stale flag", () => {
+    const session = {
+      ...createSession({ durationMs: 25 * 60_000 }),
+      pomodorosCompleted: 1,
+      cycleStarted: false,
+    };
+
+    expect(applySettingsToSession(session, sixPomodoros)).toMatchObject({
+      pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 6,
+      cycleStarted: true,
+    });
+  });
+
+  it("adopts the pending cycle size when an untouched cycle is reset", () => {
+    const running = applySettingsToSession(
+      startSession(createSession({ durationMs: 25 * 60_000 }), 0),
+      sixPomodoros,
+    );
+
+    expect(resetSession(running, true)).toMatchObject({
+      pomodorosPerCycle: 6,
+      pendingPomodorosPerCycle: 6,
+      cycleStarted: false,
+    });
+  });
+
+  it("keeps the active cycle size when resetting in the middle of a cycle", () => {
+    const running = applySettingsToSession(
+      startSession(
+        { ...createSession({ durationMs: 25 * 60_000 }), pomodorosCompleted: 2 },
+        0,
+      ),
+      sixPomodoros,
+    );
+
+    expect(resetSession(running, true)).toMatchObject({
+      pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 6,
+      cycleStarted: true,
+    });
+  });
+});
+
 describe("pauseSession and resumeSession", () => {
   it("preserves remaining time during pause and resumes from that amount", () => {
     const started = startSession(createSession({ durationMs: 2_500 }), 1_000);
@@ -5357,6 +6442,7 @@ describe("resetSession", () => {
     expect(resetSession(paused, true)).toEqual({
       ...paused,
       remainingMs: 2_500,
+      cycleStarted: false,
       status: "prepared",
       isRunning: false,
       isPaused: false,
@@ -5551,12 +6637,14 @@ export function applySettingsToSession(
   session: Session,
   settings: Settings,
 ): Session {
+  // El ciclo no ha comenzado si es estudio con 0 pomodoros y sin temporizador
+  // corriendo ni en pausa (también tras iniciar y reiniciar). Se deduce del
+  // estado y no de la bandera guardada (decisión 10, RF-10).
   const cycleStarted =
-    session.cycleStarted ??
-    (session.phase !== "study" ||
-      session.pomodorosCompleted > 0 ||
-      session.isRunning ||
-      session.isPaused);
+    session.phase !== "study" ||
+    session.pomodorosCompleted > 0 ||
+    session.isRunning ||
+    session.isPaused;
   const studyDurationMs = settings.studyDurationMinutes * 60_000;
   const shortBreakDurationMs = settings.shortBreakDurationMinutes * 60_000;
   const longBreakDurationMs = settings.longBreakDurationMinutes * 60_000;
@@ -5646,8 +6734,19 @@ export function resetSession(session: Session, confirmed: boolean): Session {
     return session;
   }
 
+  const isCycleUntouched =
+    session.phase === "study" && session.pomodorosCompleted === 0;
+
   return {
     ...session,
+    // Un reinicio que devuelve el ciclo a 0 adopta el valor pendiente.
+    ...(isCycleUntouched
+      ? {
+          pomodorosPerCycle:
+            session.pendingPomodorosPerCycle ?? session.pomodorosPerCycle,
+          cycleStarted: false,
+        }
+      : {}),
     remainingMs: session.durationMs,
     status: "prepared",
     isRunning: false,
@@ -5827,26 +6926,23 @@ export { useColorScheme } from 'react-native';
 ðŸ“„ ARCHIVO: src\hooks\use-color-scheme.web.ts
 ================================================
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { useColorScheme as useRNColorScheme } from 'react-native';
+
+const subscribe = () => () => {};
 
 /**
  * To support static rendering, this value needs to be re-calculated on the client side for web
  */
 export function useColorScheme() {
-  const [hasHydrated, setHasHydrated] = useState(false);
-
-  useEffect(() => {
-    setHasHydrated(true);
-  }, []);
-
+  const hasHydrated = useSyncExternalStore(
+    subscribe,
+    () => true,
+    () => false,
+  );
   const colorScheme = useRNColorScheme();
 
-  if (hasHydrated) {
-    return colorScheme;
-  }
-
-  return 'light';
+  return hasHydrated ? colorScheme : 'light';
 }
 
 
@@ -6043,6 +7139,89 @@ describe("session storage", () => {
     await expect(loadSession(9_000)).resolves.toEqual(restored);
   });
 
+  it("keeps the pending cycle threshold and cycle-started flag of a paused session", async () => {
+    const paused: Session = {
+      ...createSession({ durationMs: 10_000, pomodorosPerCycle: 6 }),
+      pomodorosPerCycle: 6,
+      pendingPomodorosPerCycle: 2,
+      cycleStarted: true,
+      remainingMs: 6_000,
+      status: "paused",
+      isPaused: true,
+      lastUpdatedAt: 1_000,
+    };
+    mockedStorage.getItem.mockResolvedValue(JSON.stringify(paused));
+
+    await expect(loadSession(9_000)).resolves.toEqual(paused);
+    expect(mockedStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it("keeps the active cycle threshold when recovering a running session after time away", async () => {
+    const running = startSession(
+      {
+        ...createSession({ durationMs: 60_000, pomodorosPerCycle: 6 }),
+        pendingPomodorosPerCycle: 2,
+      },
+      0,
+    );
+    mockedStorage.getItem.mockResolvedValue(JSON.stringify(running));
+
+    await expect(loadSession(10_000)).resolves.toMatchObject({
+      pomodorosPerCycle: 6,
+      pendingPomodorosPerCycle: 2,
+      cycleStarted: true,
+      remainingMs: 50_000,
+    });
+  });
+
+  it("derives the pending threshold and cycle-started flag for sessions saved before they existed", async () => {
+    mockedStorage.getItem.mockResolvedValue(
+      JSON.stringify({
+        studyDurationMs: 60_000,
+        durationMs: 900_000,
+        remainingMs: 900_000,
+        phase: "longBreak",
+        pomodorosCompleted: 3,
+        shortBreakDurationMs: 300_000,
+        longBreakDurationMs: 900_000,
+        pomodorosPerCycle: 4,
+        status: "prepared",
+        isRunning: false,
+        isPaused: false,
+        isCompleted: true,
+        lastUpdatedAt: null,
+      }),
+    );
+
+    await expect(loadSession(9_000)).resolves.toMatchObject({
+      phase: "longBreak",
+      pomodorosCompleted: 3,
+      remainingMs: 900_000,
+      pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 4,
+      cycleStarted: true,
+    });
+  });
+
+  it("treats a legacy untouched study snapshot as a cycle that has not started", async () => {
+    mockedStorage.getItem.mockResolvedValue(
+      JSON.stringify({
+        durationMs: 10_000,
+        remainingMs: 10_000,
+        isRunning: false,
+        isPaused: false,
+        isCompleted: false,
+        lastUpdatedAt: null,
+      }),
+    );
+
+    await expect(loadSession(9_000)).resolves.toMatchObject({
+      pomodorosPerCycle: 4,
+      pendingPomodorosPerCycle: 4,
+      cycleStarted: false,
+    });
+  });
+
   it("returns null when no session has been saved", async () => {
     mockedStorage.getItem.mockResolvedValue(null);
 
@@ -6143,15 +7322,29 @@ function normalizeSession(stored: Partial<Session>): Session {
           ? "running"
           : "prepared");
 
+  const phase = stored.phase ?? "study";
+  const pomodorosCompleted = stored.pomodorosCompleted ?? 0;
+  const pomodorosPerCycle = stored.pomodorosPerCycle ?? 4;
+
   return {
     studyDurationMs: stored.studyDurationMs ?? stored.durationMs!,
     durationMs: stored.durationMs!,
     remainingMs: stored.remainingMs!,
-    phase: stored.phase ?? "study",
-    pomodorosCompleted: stored.pomodorosCompleted ?? 0,
+    phase,
+    pomodorosCompleted,
     shortBreakDurationMs: stored.shortBreakDurationMs ?? 5 * 60 * 1000,
     longBreakDurationMs: stored.longBreakDurationMs ?? 15 * 60 * 1000,
-    pomodorosPerCycle: stored.pomodorosPerCycle ?? 4,
+    pomodorosPerCycle,
+    // Instantáneas de ciclo (HU-005): se conservan si existen; en sesiones
+    // guardadas antes de HU-005 se derivan sin alterar la fase ni el ciclo.
+    pendingPomodorosPerCycle:
+      stored.pendingPomodorosPerCycle ?? pomodorosPerCycle,
+    cycleStarted:
+      stored.cycleStarted ??
+      (phase !== "study" ||
+        pomodorosCompleted > 0 ||
+        status === "running" ||
+        status === "paused"),
     status,
     isRunning: stored.isRunning ?? status === "running",
     isPaused: stored.isPaused ?? status === "paused",

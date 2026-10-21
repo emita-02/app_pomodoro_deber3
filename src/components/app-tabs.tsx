@@ -29,18 +29,6 @@ export default function AppTabs() {
         }}
       />
       <Tabs.Screen
-        name="explore"
-        options={{
-          title: "Explorar",
-          tabBarIcon: ({ color, size }) => (
-            <Image
-              source={require("@/assets/images/tabIcons/explore.png")}
-              style={{ width: size, height: size, tintColor: color }}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="settings"
         options={{
           title: "Ajustes",

@@ -33,7 +33,6 @@ import {
     loadSession,
     markNotificationCycleCompleted,
     markNotificationPermissionRequested,
-    resetNotificationStateForTesting,
     saveSession,
 } from "@/storage/session-storage";
 
@@ -479,34 +478,6 @@ export function SessionControls() {
     );
   }
 
-  function handleResetNotificationStateForTesting() {
-    Alert.alert(
-      "Restablecer prueba de notificaciones",
-      "Se borrarán solo las marcas locales de notificaciones. La sesión y su configuración no cambiarán. El permiso de Android debe restablecerse por separado en Ajustes.",
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Restablecer",
-          style: "destructive",
-          onPress: () => {
-            void resetNotificationStateForTesting()
-              .then(() => {
-                setNotificationMessage(
-                  "Estado local restablecido. Revisa el permiso de notificaciones de Expo Go en Ajustes de Android antes de probar de nuevo.",
-                );
-              })
-              .catch(() => {
-                setNotificationMessage(
-                  "No se pudo restablecer el estado local de notificaciones.",
-                );
-              });
-          },
-        },
-      ],
-      { cancelable: true },
-    );
-  }
-
   const imageSource =
     session.phase === "study"
       ? require("@/assets/images/puma_estudiando.png")
@@ -611,18 +582,6 @@ export function SessionControls() {
             </Pressable>
           )}
         </View>
-        {__DEV__ && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Restablecer marcas de prueba de notificaciones"
-            onPress={handleResetNotificationStateForTesting}
-            style={styles.testResetButton}
-          >
-            <Text style={[styles.testResetButtonText, { fontFamily }]}>
-              Restablecer notificaciones (prueba)
-            </Text>
-          </Pressable>
-        )}
       </View>
     </SafeAreaView>
   );
@@ -703,17 +662,6 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: "#F2D194",
     fontSize: 21,
-  },
-  testResetButton: {
-    minHeight: 44,
-    justifyContent: "center",
-    marginTop: 12,
-  },
-  testResetButtonText: {
-    color: "#F2D194",
-    fontSize: 14,
-    textAlign: "center",
-    textDecorationLine: "underline",
   },
   pressed: {
     opacity: 0.75,
